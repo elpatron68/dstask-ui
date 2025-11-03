@@ -107,7 +107,7 @@ func (s *Server) routes() {
     s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
         w.Header().Set("Content-Type", "text/html; charset=utf-8")
         t := template.Must(s.layoutTpl.Clone())
-        _, _ = t.New("content").Parse(`<h1>dstask Web UI</h1><p>Signed in as: {{.User}}</p><div><a href="/next?html=1">Next</a> | <a href="/open?html=1">Open</a> | <a href="/active?html=1">Active</a> | <a href="/paused?html=1">Paused</a> | <a href="/resolved?html=1">Resolved</a> | <a href="/tags">Tags</a> | <a href="/projects">Projects</a> | <a href="/context">Context</a> | <a href="/tasks/new">New task</a> | <a href="/tasks/action">Actions</a> | <a href="/version">Version</a></div>
+        _, _ = t.New("content").Parse(`<h1>dstask Web UI</h1><p>Signed in as: {{.User}}</p>
 <form method="post" action="/sync" style="margin-top:8px"><button type="submit">Sync</button></form>`) // placeholder
         username, _ := auth.UsernameFromRequest(r)
         _ = t.Execute(w, map[string]any{"User": username, "Active": activeFromPath(r.URL.Path)})
