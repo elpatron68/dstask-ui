@@ -34,8 +34,11 @@ func NewServerWithConfig(userStore auth.UserStore, cfg *config.Config) *Server {
 	s.mux = http.NewServeMux()
 	s.cmdStore = ui.NewCommandLogStore(cfg.UI.CommandLogMax)
 
-	// Templates: minimal inline for MVP skeleton; real templates folgen in späteren To-dos
-	s.layoutTpl = template.Must(template.New("layout").Parse(`<!doctype html><html><head><meta charset="utf-8"><title>dstask</title>
+	// Templates: register helpers (e.g., split)
+	baseTpl := template.New("layout").Funcs(template.FuncMap{
+		"split": func(s, sep string) []string { return strings.Split(s, sep) },
+	})
+	s.layoutTpl = template.Must(baseTpl.Parse(`<!doctype html><html><head><meta charset="utf-8"><title>dstask</title>
 <style>
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;margin:16px}
 nav a{padding:6px 10px; text-decoration:none; color:#0366d6; border-radius:4px}
@@ -108,36 +111,54 @@ tbody tr:nth-child(even){background:#f9fbfd}
 }
 
 func (s *Server) routes() {
-    // Batch actions
-    s.mux.HandleFunc("/tasks/batch", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodPost { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
-        if err := r.ParseForm(); err != nil { http.Error(w, "invalid form", http.StatusBadRequest); return }
-        ids := r.Form["ids"]
-        action := strings.TrimSpace(r.FormValue("action"))
-        note := strings.TrimSpace(r.FormValue("note"))
-        if len(ids) == 0 || action == "" { http.Error(w, "ids/action required", http.StatusBadRequest); return }
-        username, _ := auth.UsernameFromRequest(r)
-        var ok, skipped, failed int
-        for _, id := range ids {
-            id = strings.TrimSpace(id)
-            if id == "" { continue }
-            var res dstask.Result
-            switch action {
-            case "start", "stop", "done", "remove", "log":
-                res = s.runner.Run(username, 10*time.Second, action, id)
-            case "note":
-                if note == "" { skipped++; continue }
-                res = s.runner.Run(username, 10*time.Second, "note", id, note)
-            default:
-                skipped++
-                continue
-            }
-            if res.Err != nil || res.ExitCode != 0 || res.TimedOut { failed++ } else { ok++ }
-        }
-        msg := fmt.Sprintf("Batch %s: %d ok, %d skipped, %d failed", action, ok, skipped, failed)
-        s.setFlash(w, "info", msg)
-        http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
-    })
+	// Batch actions
+	s.mux.HandleFunc("/tasks/batch", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid form", http.StatusBadRequest)
+			return
+		}
+		ids := r.Form["ids"]
+		action := strings.TrimSpace(r.FormValue("action"))
+		note := strings.TrimSpace(r.FormValue("note"))
+		if len(ids) == 0 || action == "" {
+			http.Error(w, "ids/action required", http.StatusBadRequest)
+			return
+		}
+		username, _ := auth.UsernameFromRequest(r)
+		var ok, skipped, failed int
+		for _, id := range ids {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			var res dstask.Result
+			switch action {
+			case "start", "stop", "done", "remove", "log":
+				res = s.runner.Run(username, 10*time.Second, action, id)
+			case "note":
+				if note == "" {
+					skipped++
+					continue
+				}
+				res = s.runner.Run(username, 10*time.Second, "note", id, note)
+			default:
+				skipped++
+				continue
+			}
+			if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
+				failed++
+			} else {
+				ok++
+			}
+		}
+		msg := fmt.Sprintf("Batch %s: %d ok, %d skipped, %d failed", action, ok, skipped, failed)
+		s.setFlash(w, "info", msg)
+		http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
+	})
 	// Toggle command log visibility via cookie
 	s.mux.HandleFunc("/__cmdlog", func(w http.ResponseWriter, r *http.Request) {
 		show := r.URL.Query().Get("show")
@@ -164,10 +185,10 @@ func (s *Server) routes() {
 <form method="post" action="/sync" style="margin-top:8px"><button type="submit">Sync</button></form>`) // placeholder
 		username, _ := auth.UsernameFromRequest(r)
 		show, entries, moreURL, canMore, ret := s.footerData(r, username)
-        _ = t.Execute(w, map[string]any{
+		_ = t.Execute(w, map[string]any{
 			"User":        username,
 			"Active":      activeFromPath(r.URL.Path),
-            "Flash":       s.getFlash(r),
+			"Flash":       s.getFlash(r),
 			"ShowCmdLog":  show,
 			"CmdEntries":  entries,
 			"MoreURL":     moreURL,
@@ -461,10 +482,10 @@ func (s *Server) routes() {
 <pre style="white-space:pre-wrap;">{{.Out}}</pre>`)
 			uname, _ := auth.UsernameFromRequest(r)
 			show, entries, moreURL, canMore, ret := s.footerData(r, uname)
-            _ = t.Execute(w, map[string]any{
+			_ = t.Execute(w, map[string]any{
 				"Out":         strings.TrimSpace(res.Stdout),
 				"Active":      activeFromPath(r.URL.Path),
-                "Flash":       s.getFlash(r),
+				"Flash":       s.getFlash(r),
 				"ShowCmdLog":  show,
 				"CmdEntries":  entries,
 				"MoreURL":     moreURL,
@@ -519,10 +540,10 @@ func (s *Server) routes() {
 <pre style="white-space:pre-wrap;">{{.Out}}</pre>`)
 			uname, _ := auth.UsernameFromRequest(r)
 			show, entries, moreURL, canMore, ret := s.footerData(r, uname)
-            _ = t.Execute(w, map[string]any{
+			_ = t.Execute(w, map[string]any{
 				"Out":         strings.TrimSpace(res.Stdout),
 				"Active":      activeFromPath(r.URL.Path),
-                "Flash":       s.getFlash(r),
+				"Flash":       s.getFlash(r),
 				"ShowCmdLog":  show,
 				"CmdEntries":  entries,
 				"MoreURL":     moreURL,
@@ -563,10 +584,10 @@ func (s *Server) routes() {
 </form>`)
 			uname, _ := auth.UsernameFromRequest(r)
 			show, entries, moreURL, canMore, ret := s.footerData(r, uname)
-            _ = t.Execute(w, map[string]any{
+			_ = t.Execute(w, map[string]any{
 				"Out":         strings.TrimSpace(res.Stdout),
 				"Active":      activeFromPath(r.URL.Path),
-                "Flash":       s.getFlash(r),
+				"Flash":       s.getFlash(r),
 				"ShowCmdLog":  show,
 				"CmdEntries":  entries,
 				"MoreURL":     moreURL,
@@ -949,10 +970,10 @@ func (s *Server) routes() {
 <pre style="white-space:pre-wrap;">{{.Out}}</pre>`)
 		uname, _ := auth.UsernameFromRequest(r)
 		show, entries, moreURL, canMore, ret := s.footerData(r, uname)
-            _ = t.Execute(w, map[string]any{
+		_ = t.Execute(w, map[string]any{
 			"Out":         out,
 			"Active":      activeFromPath(r.URL.Path),
-                "Flash":       s.getFlash(r),
+			"Flash":       s.getFlash(r),
 			"ShowCmdLog":  show,
 			"CmdEntries":  entries,
 			"MoreURL":     moreURL,
@@ -993,12 +1014,12 @@ git push -u origin master</pre>`
 {{if .Hint}}<div style="background:#fff3cd;padding:8px;border:1px solid #ffeeba;margin-bottom:8px;">{{.Hint}}</div>{{end}}
 <pre style="white-space: pre-wrap;">{{.Out}}</pre>
 <p><a href="/open?html=1">Back to list</a></p>`)
-            _ = t.Execute(w, map[string]any{
+			_ = t.Execute(w, map[string]any{
 				"Status": status,
 				"Out":    out,
 				"Hint":   template.HTML(hint),
 				"Active": activeFromPath(r.URL.Path),
-                "Flash":  s.getFlash(r),
+				"Flash":  s.getFlash(r),
 			})
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1051,22 +1072,34 @@ func (s *Server) footerData(r *http.Request, username string) (show bool, entrie
 type flash struct{ Type, Text string }
 
 func (s *Server) setFlash(w http.ResponseWriter, typ, text string) {
-    if typ == "" { typ = "info" }
-    // simple cookie, short-lived
-    http.SetCookie(w, &http.Cookie{Name: "flash", Value: urlQueryEscape(typ+"|"+text), Path: "/", MaxAge: 5})
+	if typ == "" {
+		typ = "info"
+	}
+	// simple cookie, short-lived
+	http.SetCookie(w, &http.Cookie{Name: "flash", Value: urlQueryEscape(typ + "|" + text), Path: "/", MaxAge: 5})
 }
 
 func (s *Server) getFlash(r *http.Request) *flash {
-    c, err := r.Cookie("flash")
-    if err != nil || c.Value == "" { return nil }
-    val := urlQueryUnescape(c.Value)
-    parts := strings.SplitN(val, "|", 2)
-    f := &flash{}
-    if len(parts) == 2 { f.Type = parts[0]; f.Text = parts[1] } else { f.Type = "info"; f.Text = val }
-    return f
+	c, err := r.Cookie("flash")
+	if err != nil || c.Value == "" {
+		return nil
+	}
+	val := urlQueryUnescape(c.Value)
+	parts := strings.SplitN(val, "|", 2)
+	f := &flash{}
+	if len(parts) == 2 {
+		f.Type = parts[0]
+		f.Text = parts[1]
+	} else {
+		f.Type = "info"
+		f.Text = val
+	}
+	return f
 }
 
-func urlQueryEscape(s string) string { return strings.ReplaceAll(strings.ReplaceAll(s, "|", "/"), "\n", " ") }
+func urlQueryEscape(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "|", "/"), "\n", " ")
+}
 func urlQueryUnescape(s string) string { return s }
 
 // parseTaskAction extrahiert ID und Aktion aus Pfaden wie /tasks/123/start
