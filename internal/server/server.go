@@ -50,6 +50,7 @@ nav{margin-bottom:12px}
 </style>
 </head><body>
 <nav>
+  <a href="/" class="{{if eq .Active "home"}}active{{end}}">Home</a>
   <a href="/next?html=1" class="{{if eq .Active "next"}}active{{end}}">Next</a>
   <a href="/open?html=1" class="{{if eq .Active "open"}}active{{end}}">Open</a>
   <a href="/active?html=1" class="{{if eq .Active "active"}}active{{end}}">Active</a>
