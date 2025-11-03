@@ -131,6 +131,20 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
 // `rows` erwartet bereits gefilterte/aufbereitete Zeilen.
 func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title string, rows []map[string]string) {
     t := template.Must(s.layoutTpl.Clone())
+    // enrich rows with action flags based on status
+    rowsAny := make([]map[string]any, 0, len(rows))
+    for _, m := range rows {
+        status := strings.ToLower(m["status"])
+        canStart := status == "pending" || status == "paused"
+        canStop := status == "active"
+        canDone := status != "resolved" && status != "done"
+        mm := map[string]any{}
+        for k, v := range m { mm[k] = v }
+        mm["canStart"] = canStart
+        mm["canStop"] = canStop
+        mm["canDone"] = canDone
+        rowsAny = append(rowsAny, mm)
+    }
     // sorting
     sortKey := r.URL.Query().Get("sort")
     sortDir := r.URL.Query().Get("dir")
@@ -173,9 +187,9 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
       <td>{{index . "due"}}</td>
       <td>{{index . "tags"}}</td>
       <td>
-        <form method="post" action="/tasks/{{index . "id"}}/start" style="display:inline"><button type="submit">start</button></form>
-         · <form method="post" action="/tasks/{{index . "id"}}/done" style="display:inline"><button type="submit">done</button></form>
-         · <form method="post" action="/tasks/{{index . "id"}}/stop" style="display:inline"><button type="submit">stop</button></form>
+        <form method="post" action="/tasks/{{index . "id"}}/start" style="display:inline"><button type="submit" {{if not .canStart}}disabled{{end}}>start</button></form>
+         · <form method="post" action="/tasks/{{index . "id"}}/done" style="display:inline"><button type="submit" {{if not .canDone}}disabled{{end}}>done</button></form>
+         · <form method="post" action="/tasks/{{index . "id"}}/stop" style="display:inline"><button type="submit" {{if not .canStop}}disabled{{end}}>stop</button></form>
          · <form method="post" action="/tasks/{{index . "id"}}/remove" style="display:inline"><button type="submit">remove</button></form>
       </td>
     </tr>
@@ -185,7 +199,7 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
 `)
     uname, _ := auth.UsernameFromRequest(r)
     show, entries, moreURL, canMore, ret := s.footerData(r, uname)
-    _ = t.Execute(w, map[string]any{ "Title": title, "Rows": rows, "Q": r.URL.Query().Get("q"), "Active": activeFromPath(r.URL.Path),
+    _ = t.Execute(w, map[string]any{ "Title": title, "Rows": rowsAny, "Q": r.URL.Query().Get("q"), "Active": activeFromPath(r.URL.Path),
         "ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret,
         "Sort": map[string]string{
             "ID": mk("id"), "Status": mk("status"), "Summary": mk("summary"), "Project": mk("project"), "Priority": mk("priority"), "Due": mk("due"), "Tags": mk("tags"),
