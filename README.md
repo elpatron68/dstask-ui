@@ -1,6 +1,6 @@
 # dstask-web (Go Web UI for dstask)
 
-A lightweight web UI to operate `dstask` from the browser. Implemented in Go, with Basic Auth, per-user repo mapping, and Windows support.
+A lightweight web UI to operate `[dstask](https://github.com/naggie/dstask)` from the browser. Implemented in Go, with Basic Auth, per-user repo mapping, and Windows support.
 
 ## Features (MVP)
 - Basic Auth (bcrypt or env fallback)
