@@ -11,6 +11,8 @@ A lightweight web UI to operate `dstask` from the browser. Implemented in Go, wi
 - Actions: `start`, `stop`, `done`, `remove`, `log`, `note`
 - Sync: `dstask sync`
 - HTML list views via `?html=1` with action buttons
+- Recent dstask commands footer with timestamps (configurable, per-user)
+- Enhanced New Task form: select existing project or enter new, pick tags or add new, date picker for due
 
 ## Prerequisites
 - Go >= 1.22
@@ -46,12 +48,17 @@ repos:                                   # username -> HOME or direct .dstask
   admin: "C:\\Users\\admin"           # or: "C:\\Users\\admin\\.dstask"
 logging:
   level: "info"                          # debug | info | warn | error
+ui:
+  showCommandLog: true                   # show command footer by default
+  commandLogMax: 200                     # ring buffer size per user
 ```
 - If `users` is missing/empty, `DSTWEB_USER`/`DSTWEB_PASS` are used.
 - `repos` defines the workspace per user:
   - If the path is a HOME dir, `HOME/.dstask` is used.
   - If it points to `.dstask`, that directory is used directly.
 - At runtime, `dstaskBin` can be overridden via `DSTWEB_DSTASK_BIN`.
+- Logging level can be overridden via `DSTWEB_LOG_LEVEL`.
+- Command log UI can be overridden via `DSTWEB_UI_SHOW_CMDLOG` (true/false) and `DSTWEB_CMDLOG_MAX` (int).
 
 ### Generate a bcrypt hash
 Recommended: small Go snippet (local, not part of this project):
@@ -101,6 +108,11 @@ git branch --set-upstream-to=<remote>/<branch> master
 - `POST /tasks/{id}/{action}` with action in `{start,stop,done,remove,log,note}`; for `note`, provide field `note`
 - `/tasks/action` (form UI), `POST /tasks/submit`
 - `/version`, `/sync` (GET info, POST run)
+
+### Command log footer
+- Visible on all HTML views by default; shows last 5 dstask commands (time, context, command).
+- "Show more" expands to 20; add `all=1` query to show all.
+- Toggle persists via cookie: links toggle between hide/show.
 
 ## Windows specifics
 - The server sets `HOME` and `USERPROFILE` based on `repos.<user>` so `dstask` can find its repo.
