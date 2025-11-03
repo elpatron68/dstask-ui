@@ -392,7 +392,17 @@ func (s *Server) routes() {
             t := template.Must(s.layoutTpl.Clone())
             _, _ = t.New("content").Parse(`<h2>Tags</h2>
 <pre style="white-space:pre-wrap;">{{.Out}}</pre>`) 
-            _ = t.Execute(w, map[string]any{"Out": strings.TrimSpace(res.Stdout), "Active": activeFromPath(r.URL.Path)})
+            uname, _ := auth.UsernameFromRequest(r)
+            show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+            _ = t.Execute(w, map[string]any{
+                "Out": strings.TrimSpace(res.Stdout),
+                "Active": activeFromPath(r.URL.Path),
+                "ShowCmdLog": show,
+                "CmdEntries": entries,
+                "MoreURL": moreURL,
+                "CanShowMore": canMore,
+                "ReturnURL": ret,
+            })
             return
         }
         w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -435,7 +445,17 @@ func (s *Server) routes() {
             t := template.Must(s.layoutTpl.Clone())
             _, _ = t.New("content").Parse(`<h2>Projects</h2>
 <pre style="white-space:pre-wrap;">{{.Out}}</pre>`) 
-            _ = t.Execute(w, map[string]any{"Out": strings.TrimSpace(res.Stdout), "Active": activeFromPath(r.URL.Path)})
+            uname, _ := auth.UsernameFromRequest(r)
+            show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+            _ = t.Execute(w, map[string]any{
+                "Out": strings.TrimSpace(res.Stdout),
+                "Active": activeFromPath(r.URL.Path),
+                "ShowCmdLog": show,
+                "CmdEntries": entries,
+                "MoreURL": moreURL,
+                "CanShowMore": canMore,
+                "ReturnURL": ret,
+            })
             return
         }
         w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -466,7 +486,17 @@ func (s *Server) routes() {
     <button type="submit" name="clear" value="1">Clear</button>
   </div>
 </form>`)
-            _ = t.Execute(w, map[string]any{"Out": strings.TrimSpace(res.Stdout), "Active": activeFromPath(r.URL.Path)})
+            uname, _ := auth.UsernameFromRequest(r)
+            show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+            _ = t.Execute(w, map[string]any{
+                "Out": strings.TrimSpace(res.Stdout),
+                "Active": activeFromPath(r.URL.Path),
+                "ShowCmdLog": show,
+                "CmdEntries": entries,
+                "MoreURL": moreURL,
+                "CanShowMore": canMore,
+                "ReturnURL": ret,
+            })
         case http.MethodPost:
             if err := r.ParseForm(); err != nil {
                 http.Error(w, "invalid form", http.StatusBadRequest)
@@ -543,7 +573,12 @@ func (s *Server) routes() {
   <div style="margin-top:8px;"><button type="submit">Create</button></div>
  </form>
         `)
-        _ = t.Execute(w, map[string]any{"Active": activeFromPath(r.URL.Path), "Projects": projects, "Tags": tags})
+        uname, _ := auth.UsernameFromRequest(r)
+        show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+        _ = t.Execute(w, map[string]any{
+            "Active": activeFromPath(r.URL.Path), "Projects": projects, "Tags": tags,
+            "ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret,
+        })
     })
 
     // Task erstellen (POST)
@@ -685,7 +720,12 @@ func (s *Server) routes() {
   <div><label>Note (for action "note"):<br><textarea name="note" rows="3" cols="40"></textarea></label></div>
   <div><button type="submit">Execute</button></div>
 </form>`)
-            _ = t.Execute(w, map[string]any{"Active": activeFromPath(r.URL.Path)})
+            uname, _ := auth.UsernameFromRequest(r)
+            show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+            _ = t.Execute(w, map[string]any{
+                "Active": activeFromPath(r.URL.Path),
+                "ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret,
+            })
         case http.MethodPost:
             http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
         default:
