@@ -24,6 +24,7 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
 </form>
 <table border="1" cellpadding="4" cellspacing="0">
   <thead><tr>
+    <th style="width:28px;"></th>
     <th style="width:64px;"><a href="{{.Sort.ID}}">ID</a></th>
     <th style="width:90px;"><a href="{{.Sort.Status}}">Status</a></th>
     <th><a href="{{.Sort.Text}}">Text</a></th>
@@ -33,6 +34,7 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
   {{range .Rows}}
     {{if .IsTask}}
       <tr>
+        <td></td>
         <td>{{.ID}}</td>
         <td>{{.Status}}</td>
         <td><pre style="margin:0;white-space:pre-wrap;">{{.Text}}</pre></td>
@@ -44,7 +46,7 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
         </td>
       </tr>
     {{else}}
-      <tr><td colspan="4"><pre style="margin:0;white-space:pre-wrap;">{{.Text}}</pre></td></tr>
+      <tr><td colspan="5"><pre style="margin:0;white-space:pre-wrap;">{{.Text}}</pre></td></tr>
     {{end}}
   {{end}}
   </tbody>
@@ -168,6 +170,7 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
 </form>
 <table border="1" cellpadding="4" cellspacing="0">
   <thead><tr>
+    <th style="width:28px;"></th>
     <th style="width:64px;"><a href="{{.Sort.ID}}">ID</a></th>
     <th style="width:90px;"><a href="{{.Sort.Status}}">Status</a></th>
     <th><a href="{{.Sort.Summary}}">Summary</a></th>
