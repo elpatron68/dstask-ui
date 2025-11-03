@@ -321,6 +321,13 @@ func isOverdue(due string) bool {
     return time.Now().After(t)
 }
 
+// formatDateShort returns a compact, readable datetime (YYYY-MM-DD HH:MM) if parseable
+func formatDateShort(s string) string {
+    t := parseTimeOrZero(s)
+    if t.IsZero() { return s }
+    return t.Format("2006-01-02 15:04")
+}
+
 
 // decodeTasksJSON versucht, eine JSON-Array-Ausgabe (wie von `dstask export`) zu parsen.
 func decodeTasksJSON(raw string) ([]map[string]any, bool) {

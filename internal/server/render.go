@@ -143,6 +143,8 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
         canDone := status != "resolved" && status != "done"
         mm := map[string]any{}
         for k, v := range m { mm[k] = v }
+        if cs, ok := m["created"]; ok { mm["created"] = formatDateShort(cs) }
+        if rs, ok := m["resolved"]; ok { mm["resolved"] = formatDateShort(rs) }
         mm["canStart"] = canStart
         mm["canStop"] = canStop
         mm["canDone"] = canDone

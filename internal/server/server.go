@@ -250,7 +250,7 @@ func (s *Server) routes() {
 			if exp.Err == nil && exp.ExitCode == 0 && !exp.TimedOut {
 				if tasks, ok := decodeTasksJSON(exp.Stdout); ok && len(tasks) > 0 {
 					rows := make([]map[string]string, 0, len(tasks))
-                    for _, t := range tasks {
+					for _, t := range tasks {
 						// Zeige alle offenen und aktiven; resolved werden unten ggf. herausgefiltert
 						id := str(firstOf(t, "id", "ID", "Id", "uuid", "UUID"))
 						if id == "" {
@@ -263,9 +263,9 @@ func (s *Server) routes() {
 							"project":  trimQuotes(str(firstOf(t, "project", "Project"))),
 							"priority": str(firstOf(t, "priority", "Priority")),
 							"due":      trimQuotes(str(firstOf(t, "due", "Due", "dueDate", "DueDate"))),
-                            "created":  trimQuotes(str(firstOf(t, "created", "Created"))),
-                            "resolved": trimQuotes(str(firstOf(t, "resolved", "Resolved"))),
-                            "age":      ageInDays(trimQuotes(str(firstOf(t, "created", "Created")))),
+							"created":  trimQuotes(str(firstOf(t, "created", "Created"))),
+							"resolved": trimQuotes(str(firstOf(t, "resolved", "Resolved"))),
+							"age":      ageInDays(trimQuotes(str(firstOf(t, "created", "Created")))),
 							"tags":     joinTags(firstOf(t, "tags", "Tags")),
 						})
 					}
@@ -293,7 +293,7 @@ func (s *Server) routes() {
 			// Versuche zuerst JSON aus show-open zu extrahieren (manche Builds geben JSON aus)
 			if tasks2, ok := decodeTasksJSON(res.Stdout); ok && len(tasks2) > 0 {
 				rows := make([]map[string]string, 0, len(tasks2))
-                for _, t := range tasks2 {
+				for _, t := range tasks2 {
 					id := str(firstOf(t, "id", "ID", "uuid"))
 					if id == "" {
 						continue
@@ -304,10 +304,10 @@ func (s *Server) routes() {
 						"summary":  trimQuotes(str(firstOf(t, "summary", "description"))),
 						"project":  trimQuotes(str(firstOf(t, "project"))),
 						"priority": str(firstOf(t, "priority")),
-                        "due":      trimQuotes(str(firstOf(t, "due"))),
-                        "created":  trimQuotes(str(firstOf(t, "created"))),
-                        "resolved": trimQuotes(str(firstOf(t, "resolved"))),
-                        "age":      ageInDays(trimQuotes(str(firstOf(t, "created")))),
+						"due":      trimQuotes(str(firstOf(t, "due"))),
+						"created":  trimQuotes(str(firstOf(t, "created"))),
+						"resolved": trimQuotes(str(firstOf(t, "resolved"))),
+						"age":      ageInDays(trimQuotes(str(firstOf(t, "created")))),
 						"tags":     joinTags(firstOf(t, "tags")),
 					})
 				}
