@@ -1,41 +1,41 @@
 package server
 
 import (
-    "fmt"
-    "html/template"
-    "net/http"
-    "strings"
-    "time"
+	"fmt"
+	"html/template"
+	"net/http"
+	"strings"
+	"time"
 
-    "github.com/elpatron68/dstask-ui/internal/auth"
-    "github.com/elpatron68/dstask-ui/internal/config"
-    "github.com/elpatron68/dstask-ui/internal/dstask"
-    applog "github.com/elpatron68/dstask-ui/internal/log"
-    "github.com/elpatron68/dstask-ui/internal/ui"
+	"github.com/elpatron68/dstask-ui/internal/auth"
+	"github.com/elpatron68/dstask-ui/internal/config"
+	"github.com/elpatron68/dstask-ui/internal/dstask"
+	applog "github.com/elpatron68/dstask-ui/internal/log"
+	"github.com/elpatron68/dstask-ui/internal/ui"
 )
 
 type Server struct {
-    userStore auth.UserStore
-    mux       *http.ServeMux
-    layoutTpl *template.Template
-    cfg       *config.Config
-    runner    *dstask.Runner
-    cmdStore  *ui.CommandLogStore
-    uiCfg     config.UIConfig
+	userStore auth.UserStore
+	mux       *http.ServeMux
+	layoutTpl *template.Template
+	cfg       *config.Config
+	runner    *dstask.Runner
+	cmdStore  *ui.CommandLogStore
+	uiCfg     config.UIConfig
 }
 
 func NewServer(userStore auth.UserStore) *Server {
-    return NewServerWithConfig(userStore, config.Default())
+	return NewServerWithConfig(userStore, config.Default())
 }
 
 func NewServerWithConfig(userStore auth.UserStore, cfg *config.Config) *Server {
-    s := &Server{userStore: userStore, cfg: cfg, uiCfg: cfg.UI}
-    s.runner = dstask.NewRunner(cfg)
-    s.mux = http.NewServeMux()
-    s.cmdStore = ui.NewCommandLogStore(cfg.UI.CommandLogMax)
+	s := &Server{userStore: userStore, cfg: cfg, uiCfg: cfg.UI}
+	s.runner = dstask.NewRunner(cfg)
+	s.mux = http.NewServeMux()
+	s.cmdStore = ui.NewCommandLogStore(cfg.UI.CommandLogMax)
 
-    // Templates: minimal inline for MVP skeleton; real templates folgen in späteren To-dos
-    s.layoutTpl = template.Must(template.New("layout").Parse(`<!doctype html><html><head><meta charset="utf-8"><title>dstask</title>
+	// Templates: minimal inline for MVP skeleton; real templates folgen in späteren To-dos
+	s.layoutTpl = template.Must(template.New("layout").Parse(`<!doctype html><html><head><meta charset="utf-8"><title>dstask</title>
 <style>
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;margin:16px}
 nav a{padding:6px 10px; text-decoration:none; color:#0366d6; border-radius:4px}
@@ -83,411 +83,423 @@ nav{margin-bottom:12px}
 {{ end }}
 </body></html>`))
 
-    s.routes()
-    return s
+	s.routes()
+	return s
 }
 
 func (s *Server) routes() {
-    // Toggle command log visibility via cookie
-    s.mux.HandleFunc("/__cmdlog", func(w http.ResponseWriter, r *http.Request) {
-        show := r.URL.Query().Get("show")
-        ret := r.URL.Query().Get("return")
-        if show == "0" {
-            http.SetCookie(w, &http.Cookie{Name: "cmdlog", Value: "off", Path: "/", MaxAge: 86400 * 365})
-        } else if show == "1" {
-            http.SetCookie(w, &http.Cookie{Name: "cmdlog", Value: "on", Path: "/", MaxAge: 86400 * 365})
-        }
-        if ret == "" { ret = "/" }
-        http.Redirect(w, r, ret, http.StatusSeeOther)
-    })
-    s.mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-        _, _ = w.Write([]byte("ok"))
-    })
+	// Toggle command log visibility via cookie
+	s.mux.HandleFunc("/__cmdlog", func(w http.ResponseWriter, r *http.Request) {
+		show := r.URL.Query().Get("show")
+		ret := r.URL.Query().Get("return")
+		if show == "0" {
+			http.SetCookie(w, &http.Cookie{Name: "cmdlog", Value: "off", Path: "/", MaxAge: 86400 * 365})
+		} else if show == "1" {
+			http.SetCookie(w, &http.Cookie{Name: "cmdlog", Value: "on", Path: "/", MaxAge: 86400 * 365})
+		}
+		if ret == "" {
+			ret = "/"
+		}
+		http.Redirect(w, r, ret, http.StatusSeeOther)
+	})
+	s.mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte("ok"))
+	})
 
-    s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Content-Type", "text/html; charset=utf-8")
-        t := template.Must(s.layoutTpl.Clone())
-        _, _ = t.New("content").Parse(`<h1>dstask Web UI</h1><p>Signed in as: {{.User}}</p>
+	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		t := template.Must(s.layoutTpl.Clone())
+		_, _ = t.New("content").Parse(`<h1>dstask Web UI</h1><p>Signed in as: {{.User}}</p>
 <form method="post" action="/sync" style="margin-top:8px"><button type="submit">Sync</button></form>`) // placeholder
-        username, _ := auth.UsernameFromRequest(r)
-        show, entries, moreURL, canMore, ret := s.footerData(r, username)
-        _ = t.Execute(w, map[string]any{
-            "User": username,
-            "Active": activeFromPath(r.URL.Path),
-            "ShowCmdLog": show,
-            "CmdEntries": entries,
-            "MoreURL": moreURL,
-            "CanShowMore": canMore,
-            "ReturnURL": ret,
-        })
-    })
+		username, _ := auth.UsernameFromRequest(r)
+		show, entries, moreURL, canMore, ret := s.footerData(r, username)
+		_ = t.Execute(w, map[string]any{
+			"User":        username,
+			"Active":      activeFromPath(r.URL.Path),
+			"ShowCmdLog":  show,
+			"CmdEntries":  entries,
+			"MoreURL":     moreURL,
+			"CanShowMore": canMore,
+			"ReturnURL":   ret,
+		})
+	})
 
-    s.mux.HandleFunc("/next", func(w http.ResponseWriter, r *http.Request) {
-        username, _ := auth.UsernameFromRequest(r)
-        s.cmdStore.Append(username, "List next tasks", []string{"next"})
-        if r.URL.Query().Get("html") == "1" {
-            exp := s.runner.Run(username, 5_000_000_000, "export")
-            if exp.Err == nil && exp.ExitCode == 0 && !exp.TimedOut {
-                if tasks, ok := decodeTasksJSONFlexible(exp.Stdout); ok && len(tasks) > 0 {
-                    rows := buildRowsFromTasks(tasks, "")
-                    rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
-                    if len(rows) > 0 {
-                        w.Header().Set("Content-Type", "text/html; charset=utf-8")
-                        s.renderExportTable(w, r, "Next", rows)
-                        return
-                    }
-                }
-            }
-            res := s.runner.Run(username, 5_000_000_000, "next")
-            if res.Err != nil && !res.TimedOut {
-                http.Error(w, res.Stderr, http.StatusBadGateway)
-                return
-            }
-            // Versuch: JSON direkt aus next-Stdout extrahieren
-            if tasks2, ok := decodeTasksJSONFlexible(res.Stdout); ok && len(tasks2) > 0 {
-                rows := buildRowsFromTasks(tasks2, "")
-                rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
-                if len(rows) > 0 {
-                    w.Header().Set("Content-Type", "text/html; charset=utf-8")
-                    s.renderExportTable(w, r, "Next", rows)
-                    return
-                }
-            }
-            w.Header().Set("Content-Type", "text/html; charset=utf-8")
-            s.renderListHTML(w, r, "Next", res.Stdout)
-            return
-        }
-        res := s.runner.Run(username, 5_000_000_000, "next")
-        if res.Err != nil && !res.TimedOut {
-            http.Error(w, res.Stderr, http.StatusBadGateway)
-            return
-        }
-        w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-        _, _ = w.Write([]byte(res.Stdout))
-    })
+	s.mux.HandleFunc("/next", func(w http.ResponseWriter, r *http.Request) {
+		username, _ := auth.UsernameFromRequest(r)
+		s.cmdStore.Append(username, "List next tasks", []string{"next"})
+		if r.URL.Query().Get("html") == "1" {
+			exp := s.runner.Run(username, 5_000_000_000, "export")
+			if exp.Err == nil && exp.ExitCode == 0 && !exp.TimedOut {
+				if tasks, ok := decodeTasksJSONFlexible(exp.Stdout); ok && len(tasks) > 0 {
+					rows := buildRowsFromTasks(tasks, "")
+					rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
+					if len(rows) > 0 {
+						w.Header().Set("Content-Type", "text/html; charset=utf-8")
+						s.renderExportTable(w, r, "Next", rows)
+						return
+					}
+				}
+			}
+			res := s.runner.Run(username, 5_000_000_000, "next")
+			if res.Err != nil && !res.TimedOut {
+				http.Error(w, res.Stderr, http.StatusBadGateway)
+				return
+			}
+			// Versuch: JSON direkt aus next-Stdout extrahieren
+			if tasks2, ok := decodeTasksJSONFlexible(res.Stdout); ok && len(tasks2) > 0 {
+				rows := buildRowsFromTasks(tasks2, "")
+				rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
+				if len(rows) > 0 {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					s.renderExportTable(w, r, "Next", rows)
+					return
+				}
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			s.renderListHTML(w, r, "Next", res.Stdout)
+			return
+		}
+		res := s.runner.Run(username, 5_000_000_000, "next")
+		if res.Err != nil && !res.TimedOut {
+			http.Error(w, res.Stderr, http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte(res.Stdout))
+	})
 
-    s.mux.HandleFunc("/open", func(w http.ResponseWriter, r *http.Request) {
-        username, _ := auth.UsernameFromRequest(r)
-        s.cmdStore.Append(username, "List open tasks", []string{"show-open"})
-        if r.URL.Query().Get("html") == "1" {
-            // Primär: export rohen JSON-Text holen und parsen (robuster, da wir Json sehen)
-            exp := s.runner.Run(username, 5_000_000_000, "export")
-            if exp.Err == nil && exp.ExitCode == 0 && !exp.TimedOut {
-                if tasks, ok := decodeTasksJSON(exp.Stdout); ok && len(tasks) > 0 {
-                    rows := make([]map[string]string, 0, len(tasks))
-                    for _, t := range tasks {
-                        // Zeige alle offenen und aktiven; resolved werden unten ggf. herausgefiltert
-                        id := str(firstOf(t, "id", "ID", "Id", "uuid", "UUID"))
-                        if id == "" { continue }
-                        rows = append(rows, map[string]string{
-                            "id":       id,
-                            "status":   str(firstOf(t, "status", "state")),
-                            "summary":  trimQuotes(str(firstOf(t, "summary", "Summary", "description", "Description"))),
-                            "project":  trimQuotes(str(firstOf(t, "project", "Project"))),
-                            "priority": str(firstOf(t, "priority", "Priority")),
-                            "due":      trimQuotes(str(firstOf(t, "due", "Due", "dueDate", "DueDate"))),
-                            "tags":     joinTags(firstOf(t, "tags", "Tags")),
-                        })
-                    }
-                    if len(rows) > 0 {
-                w.Header().Set("Content-Type", "text/html; charset=utf-8")
-                s.renderExportTable(w, r, "Open", rows)
-                        return
-                    }
-                } else {
-                    // Loose Parser über den Rohtext
-                    rows := parseTasksLooseFromJSONText(exp.Stdout)
-                    if len(rows) > 0 {
-                        w.Header().Set("Content-Type", "text/html; charset=utf-8")
-                        s.renderExportTable(w, r, "Open", rows)
-                        return
-                    }
-                }
-            }
-            // Fallback: Plaintext parsen und als Tabelle rendern
-            res := s.runner.Run(username, 5_000_000_000, "show-open")
-            if res.Err != nil && !res.TimedOut {
-                http.Error(w, res.Stderr, http.StatusBadGateway)
-                return
-            }
-            // Versuche zuerst JSON aus show-open zu extrahieren (manche Builds geben JSON aus)
-            if tasks2, ok := decodeTasksJSON(res.Stdout); ok && len(tasks2) > 0 {
-                rows := make([]map[string]string, 0, len(tasks2))
-                for _, t := range tasks2 {
-                    id := str(firstOf(t, "id", "ID", "uuid"))
-                    if id == "" { continue }
-                    rows = append(rows, map[string]string{
-                        "id":       id,
-                        "status":   str(firstOf(t, "status", "state")),
-                        "summary":  trimQuotes(str(firstOf(t, "summary", "description"))),
-                        "project":  trimQuotes(str(firstOf(t, "project"))),
-                        "priority": str(firstOf(t, "priority")),
-                        "due":      trimQuotes(str(firstOf(t, "due"))),
-                        "tags":     joinTags(firstOf(t, "tags")),
-                    })
-                }
-                if len(rows) > 0 {
-                    w.Header().Set("Content-Type", "text/html; charset=utf-8")
-                    s.renderExportTable(w, r, "Open", rows)
-                    return
-                }
-            }
-            rows := parseOpenPlain(res.Stdout)
-            w.Header().Set("Content-Type", "text/html; charset=utf-8")
-            if len(rows) > 0 {
-                s.renderExportTable(w, r, "Open", rows)
-            } else {
-                ok := r.URL.Query().Get("ok") != ""
-                // reuse list renderer with Ok flag
-            w.Header().Set("Content-Type", "text/html; charset=utf-8")
-            t := template.Must(s.layoutTpl.Clone())
-            _, _ = t.New("content").Parse(`<h2>Open</h2>{{if .Ok}}<div style="background:#d4edda;border:1px solid #c3e6cb;color:#155724;padding:8px;margin-bottom:8px;">Action successful</div>{{end}}<pre style="white-space: pre-wrap;">{{.Body}}</pre>`)
-            _ = t.Execute(w, map[string]any{"Ok": ok, "Body": res.Stdout, "Active": activeFromPath(r.URL.Path)})
-            }
-            return
-        }
-        // Plaintext
-        res := s.runner.Run(username, 5_000_000_000, "show-open")
-        if res.Err != nil && !res.TimedOut {
-            http.Error(w, res.Stderr, http.StatusBadGateway)
-            return
-        }
-        w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-        _, _ = w.Write([]byte(res.Stdout))
-    })
+	s.mux.HandleFunc("/open", func(w http.ResponseWriter, r *http.Request) {
+		username, _ := auth.UsernameFromRequest(r)
+		s.cmdStore.Append(username, "List open tasks", []string{"show-open"})
+		if r.URL.Query().Get("html") == "1" {
+			// Primär: export rohen JSON-Text holen und parsen (robuster, da wir Json sehen)
+			exp := s.runner.Run(username, 5_000_000_000, "export")
+			if exp.Err == nil && exp.ExitCode == 0 && !exp.TimedOut {
+				if tasks, ok := decodeTasksJSON(exp.Stdout); ok && len(tasks) > 0 {
+					rows := make([]map[string]string, 0, len(tasks))
+					for _, t := range tasks {
+						// Zeige alle offenen und aktiven; resolved werden unten ggf. herausgefiltert
+						id := str(firstOf(t, "id", "ID", "Id", "uuid", "UUID"))
+						if id == "" {
+							continue
+						}
+						rows = append(rows, map[string]string{
+							"id":       id,
+							"status":   str(firstOf(t, "status", "state")),
+							"summary":  trimQuotes(str(firstOf(t, "summary", "Summary", "description", "Description"))),
+							"project":  trimQuotes(str(firstOf(t, "project", "Project"))),
+							"priority": str(firstOf(t, "priority", "Priority")),
+							"due":      trimQuotes(str(firstOf(t, "due", "Due", "dueDate", "DueDate"))),
+							"tags":     joinTags(firstOf(t, "tags", "Tags")),
+						})
+					}
+					if len(rows) > 0 {
+						w.Header().Set("Content-Type", "text/html; charset=utf-8")
+						s.renderExportTable(w, r, "Open", rows)
+						return
+					}
+				} else {
+					// Loose Parser über den Rohtext
+					rows := parseTasksLooseFromJSONText(exp.Stdout)
+					if len(rows) > 0 {
+						w.Header().Set("Content-Type", "text/html; charset=utf-8")
+						s.renderExportTable(w, r, "Open", rows)
+						return
+					}
+				}
+			}
+			// Fallback: Plaintext parsen und als Tabelle rendern
+			res := s.runner.Run(username, 5_000_000_000, "show-open")
+			if res.Err != nil && !res.TimedOut {
+				http.Error(w, res.Stderr, http.StatusBadGateway)
+				return
+			}
+			// Versuche zuerst JSON aus show-open zu extrahieren (manche Builds geben JSON aus)
+			if tasks2, ok := decodeTasksJSON(res.Stdout); ok && len(tasks2) > 0 {
+				rows := make([]map[string]string, 0, len(tasks2))
+				for _, t := range tasks2 {
+					id := str(firstOf(t, "id", "ID", "uuid"))
+					if id == "" {
+						continue
+					}
+					rows = append(rows, map[string]string{
+						"id":       id,
+						"status":   str(firstOf(t, "status", "state")),
+						"summary":  trimQuotes(str(firstOf(t, "summary", "description"))),
+						"project":  trimQuotes(str(firstOf(t, "project"))),
+						"priority": str(firstOf(t, "priority")),
+						"due":      trimQuotes(str(firstOf(t, "due"))),
+						"tags":     joinTags(firstOf(t, "tags")),
+					})
+				}
+				if len(rows) > 0 {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					s.renderExportTable(w, r, "Open", rows)
+					return
+				}
+			}
+			rows := parseOpenPlain(res.Stdout)
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if len(rows) > 0 {
+				s.renderExportTable(w, r, "Open", rows)
+			} else {
+				ok := r.URL.Query().Get("ok") != ""
+				// reuse list renderer with Ok flag
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				t := template.Must(s.layoutTpl.Clone())
+				_, _ = t.New("content").Parse(`<h2>Open</h2>{{if .Ok}}<div style="background:#d4edda;border:1px solid #c3e6cb;color:#155724;padding:8px;margin-bottom:8px;">Action successful</div>{{end}}<pre style="white-space: pre-wrap;">{{.Body}}</pre>`)
+				_ = t.Execute(w, map[string]any{"Ok": ok, "Body": res.Stdout, "Active": activeFromPath(r.URL.Path)})
+			}
+			return
+		}
+		// Plaintext
+		res := s.runner.Run(username, 5_000_000_000, "show-open")
+		if res.Err != nil && !res.TimedOut {
+			http.Error(w, res.Stderr, http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte(res.Stdout))
+	})
 
-    s.mux.HandleFunc("/active", func(w http.ResponseWriter, r *http.Request) {
-        username, _ := auth.UsernameFromRequest(r)
-        s.cmdStore.Append(username, "List active tasks", []string{"show-active"})
-        if r.URL.Query().Get("html") == "1" {
-            exp := s.runner.Run(username, 5_000_000_000, "export")
-            if exp.Err == nil && exp.ExitCode == 0 && !exp.TimedOut {
-                if tasks, ok := decodeTasksJSONFlexible(exp.Stdout); ok && len(tasks) > 0 {
-                    rows := buildRowsFromTasks(tasks, "active")
-                    rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
-                    if len(rows) > 0 {
-                        w.Header().Set("Content-Type", "text/html; charset=utf-8")
-                        s.renderExportTable(w, r, "Active", rows)
-                        return
-                    }
-                }
-            }
-            res := s.runner.Run(username, 5_000_000_000, "show-active")
-            if res.Err != nil && !res.TimedOut {
-                http.Error(w, res.Stderr, http.StatusBadGateway)
-                return
-            }
-            // Versuch: JSON direkt aus show-active-Stdout extrahieren
-            if tasks2, ok := decodeTasksJSONFlexible(res.Stdout); ok && len(tasks2) > 0 {
-                rows := buildRowsFromTasks(tasks2, "active")
-                rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
-                if len(rows) > 0 {
-                    w.Header().Set("Content-Type", "text/html; charset=utf-8")
-                    s.renderExportTable(w, r, "Active", rows)
-                    return
-                }
-            }
-            w.Header().Set("Content-Type", "text/html; charset=utf-8")
-            s.renderListHTML(w, r, "Active", res.Stdout)
-            return
-        }
-        res := s.runner.Run(username, 5_000_000_000, "show-active")
-        if res.Err != nil && !res.TimedOut {
-            http.Error(w, res.Stderr, http.StatusBadGateway)
-            return
-        }
-        w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-        _, _ = w.Write([]byte(res.Stdout))
-    })
+	s.mux.HandleFunc("/active", func(w http.ResponseWriter, r *http.Request) {
+		username, _ := auth.UsernameFromRequest(r)
+		s.cmdStore.Append(username, "List active tasks", []string{"show-active"})
+		if r.URL.Query().Get("html") == "1" {
+			exp := s.runner.Run(username, 5_000_000_000, "export")
+			if exp.Err == nil && exp.ExitCode == 0 && !exp.TimedOut {
+				if tasks, ok := decodeTasksJSONFlexible(exp.Stdout); ok && len(tasks) > 0 {
+					rows := buildRowsFromTasks(tasks, "active")
+					rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
+					if len(rows) > 0 {
+						w.Header().Set("Content-Type", "text/html; charset=utf-8")
+						s.renderExportTable(w, r, "Active", rows)
+						return
+					}
+				}
+			}
+			res := s.runner.Run(username, 5_000_000_000, "show-active")
+			if res.Err != nil && !res.TimedOut {
+				http.Error(w, res.Stderr, http.StatusBadGateway)
+				return
+			}
+			// Versuch: JSON direkt aus show-active-Stdout extrahieren
+			if tasks2, ok := decodeTasksJSONFlexible(res.Stdout); ok && len(tasks2) > 0 {
+				rows := buildRowsFromTasks(tasks2, "active")
+				rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
+				if len(rows) > 0 {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					s.renderExportTable(w, r, "Active", rows)
+					return
+				}
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			s.renderListHTML(w, r, "Active", res.Stdout)
+			return
+		}
+		res := s.runner.Run(username, 5_000_000_000, "show-active")
+		if res.Err != nil && !res.TimedOut {
+			http.Error(w, res.Stderr, http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte(res.Stdout))
+	})
 
-    s.mux.HandleFunc("/paused", func(w http.ResponseWriter, r *http.Request) {
-        username, _ := auth.UsernameFromRequest(r)
-        s.cmdStore.Append(username, "List paused tasks", []string{"show-paused"})
-        if r.URL.Query().Get("html") == "1" {
-            exp := s.runner.Run(username, 5_000_000_000, "export")
-            if exp.Err == nil && exp.ExitCode == 0 && !exp.TimedOut {
-                if tasks, ok := decodeTasksJSON(exp.Stdout); ok && len(tasks) > 0 {
-                    rows := buildRowsFromTasks(tasks, "paused")
-                    rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
-                    if len(rows) > 0 {
-                        w.Header().Set("Content-Type", "text/html; charset=utf-8")
-                        s.renderExportTable(w, r, "Paused", rows)
-                        return
-                    }
-                }
-            }
-            res := s.runner.Run(username, 5_000_000_000, "show-paused")
-            if res.Err != nil && !res.TimedOut {
-                http.Error(w, res.Stderr, http.StatusBadGateway)
-                return
-            }
-            // Versuch: JSON direkt aus show-paused-Stdout extrahieren
-            if tasks2, ok := decodeTasksJSONFlexible(res.Stdout); ok && len(tasks2) > 0 {
-                rows := buildRowsFromTasks(tasks2, "paused")
-                rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
-                if len(rows) > 0 {
-                    w.Header().Set("Content-Type", "text/html; charset=utf-8")
-                    s.renderExportTable(w, r, "Paused", rows)
-                    return
-                }
-            }
-            w.Header().Set("Content-Type", "text/html; charset=utf-8")
-            s.renderListHTML(w, r, "Paused", res.Stdout)
-            return
-        }
-        res := s.runner.Run(username, 5_000_000_000, "show-paused")
-        if res.Err != nil && !res.TimedOut {
-            http.Error(w, res.Stderr, http.StatusBadGateway)
-            return
-        }
-        w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-        _, _ = w.Write([]byte(res.Stdout))
-    })
+	s.mux.HandleFunc("/paused", func(w http.ResponseWriter, r *http.Request) {
+		username, _ := auth.UsernameFromRequest(r)
+		s.cmdStore.Append(username, "List paused tasks", []string{"show-paused"})
+		if r.URL.Query().Get("html") == "1" {
+			exp := s.runner.Run(username, 5_000_000_000, "export")
+			if exp.Err == nil && exp.ExitCode == 0 && !exp.TimedOut {
+				if tasks, ok := decodeTasksJSON(exp.Stdout); ok && len(tasks) > 0 {
+					rows := buildRowsFromTasks(tasks, "paused")
+					rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
+					if len(rows) > 0 {
+						w.Header().Set("Content-Type", "text/html; charset=utf-8")
+						s.renderExportTable(w, r, "Paused", rows)
+						return
+					}
+				}
+			}
+			res := s.runner.Run(username, 5_000_000_000, "show-paused")
+			if res.Err != nil && !res.TimedOut {
+				http.Error(w, res.Stderr, http.StatusBadGateway)
+				return
+			}
+			// Versuch: JSON direkt aus show-paused-Stdout extrahieren
+			if tasks2, ok := decodeTasksJSONFlexible(res.Stdout); ok && len(tasks2) > 0 {
+				rows := buildRowsFromTasks(tasks2, "paused")
+				rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
+				if len(rows) > 0 {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					s.renderExportTable(w, r, "Paused", rows)
+					return
+				}
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			s.renderListHTML(w, r, "Paused", res.Stdout)
+			return
+		}
+		res := s.runner.Run(username, 5_000_000_000, "show-paused")
+		if res.Err != nil && !res.TimedOut {
+			http.Error(w, res.Stderr, http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte(res.Stdout))
+	})
 
-    s.mux.HandleFunc("/resolved", func(w http.ResponseWriter, r *http.Request) {
-        username, _ := auth.UsernameFromRequest(r)
-        s.cmdStore.Append(username, "List resolved tasks", []string{"show-resolved"})
-        if r.URL.Query().Get("html") == "1" {
-            exp := s.runner.Run(username, 5_000_000_000, "export")
-            if exp.Err == nil && exp.ExitCode == 0 && !exp.TimedOut {
-                if tasks, ok := decodeTasksJSON(exp.Stdout); ok && len(tasks) > 0 {
-                    rows := buildRowsFromTasks(tasks, "resolved")
-                    rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
-                    if len(rows) > 0 {
-                        w.Header().Set("Content-Type", "text/html; charset=utf-8")
-                        s.renderExportTable(w, r, "Resolved", rows)
-                        return
-                    }
-                }
-            }
-            res := s.runner.Run(username, 5_000_000_000, "show-resolved")
-            if res.Err != nil && !res.TimedOut {
-                http.Error(w, res.Stderr, http.StatusBadGateway)
-                return
-            }
-            // Versuch: JSON direkt aus show-resolved-Stdout extrahieren
-            if tasks2, ok := decodeTasksJSONFlexible(res.Stdout); ok && len(tasks2) > 0 {
-                rows := buildRowsFromTasks(tasks2, "resolved")
-                rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
-                if len(rows) > 0 {
-                    w.Header().Set("Content-Type", "text/html; charset=utf-8")
-                    s.renderExportTable(w, r, "Resolved", rows)
-                    return
-                }
-            }
-            w.Header().Set("Content-Type", "text/html; charset=utf-8")
-            s.renderListHTML(w, r, "Resolved", res.Stdout)
-            return
-        }
-        res := s.runner.Run(username, 5_000_000_000, "show-resolved")
-        if res.Err != nil && !res.TimedOut {
-            http.Error(w, res.Stderr, http.StatusBadGateway)
-            return
-        }
-        w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-        _, _ = w.Write([]byte(res.Stdout))
-    })
+	s.mux.HandleFunc("/resolved", func(w http.ResponseWriter, r *http.Request) {
+		username, _ := auth.UsernameFromRequest(r)
+		s.cmdStore.Append(username, "List resolved tasks", []string{"show-resolved"})
+		if r.URL.Query().Get("html") == "1" {
+			exp := s.runner.Run(username, 5_000_000_000, "export")
+			if exp.Err == nil && exp.ExitCode == 0 && !exp.TimedOut {
+				if tasks, ok := decodeTasksJSON(exp.Stdout); ok && len(tasks) > 0 {
+					rows := buildRowsFromTasks(tasks, "resolved")
+					rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
+					if len(rows) > 0 {
+						w.Header().Set("Content-Type", "text/html; charset=utf-8")
+						s.renderExportTable(w, r, "Resolved", rows)
+						return
+					}
+				}
+			}
+			res := s.runner.Run(username, 5_000_000_000, "show-resolved")
+			if res.Err != nil && !res.TimedOut {
+				http.Error(w, res.Stderr, http.StatusBadGateway)
+				return
+			}
+			// Versuch: JSON direkt aus show-resolved-Stdout extrahieren
+			if tasks2, ok := decodeTasksJSONFlexible(res.Stdout); ok && len(tasks2) > 0 {
+				rows := buildRowsFromTasks(tasks2, "resolved")
+				rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
+				if len(rows) > 0 {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					s.renderExportTable(w, r, "Resolved", rows)
+					return
+				}
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			s.renderListHTML(w, r, "Resolved", res.Stdout)
+			return
+		}
+		res := s.runner.Run(username, 5_000_000_000, "show-resolved")
+		if res.Err != nil && !res.TimedOut {
+			http.Error(w, res.Stderr, http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte(res.Stdout))
+	})
 
-    s.mux.HandleFunc("/tags", func(w http.ResponseWriter, r *http.Request) {
-        username, _ := auth.UsernameFromRequest(r)
-        res := s.runner.Run(username, 5_000_000_000, "show-tags")
-        s.cmdStore.Append(username, "List tags", []string{"show-tags"})
-        if res.Err != nil && !res.TimedOut {
-            http.Error(w, res.Stderr, http.StatusBadGateway)
-            return
-        }
-        if r.URL.Query().Get("raw") != "1" {
-            w.Header().Set("Content-Type", "text/html; charset=utf-8")
-            t := template.Must(s.layoutTpl.Clone())
-            _, _ = t.New("content").Parse(`<h2>Tags</h2>
-<pre style="white-space:pre-wrap;">{{.Out}}</pre>`) 
-            uname, _ := auth.UsernameFromRequest(r)
-            show, entries, moreURL, canMore, ret := s.footerData(r, uname)
-            _ = t.Execute(w, map[string]any{
-                "Out": strings.TrimSpace(res.Stdout),
-                "Active": activeFromPath(r.URL.Path),
-                "ShowCmdLog": show,
-                "CmdEntries": entries,
-                "MoreURL": moreURL,
-                "CanShowMore": canMore,
-                "ReturnURL": ret,
-            })
-            return
-        }
-        w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-        out := strings.TrimSpace(res.Stdout)
-        if out == "" { out = "Keine Tags vorhanden" }
-        _, _ = w.Write([]byte(out))
-    })
+	s.mux.HandleFunc("/tags", func(w http.ResponseWriter, r *http.Request) {
+		username, _ := auth.UsernameFromRequest(r)
+		res := s.runner.Run(username, 5_000_000_000, "show-tags")
+		s.cmdStore.Append(username, "List tags", []string{"show-tags"})
+		if res.Err != nil && !res.TimedOut {
+			http.Error(w, res.Stderr, http.StatusBadGateway)
+			return
+		}
+		if r.URL.Query().Get("raw") != "1" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			t := template.Must(s.layoutTpl.Clone())
+			_, _ = t.New("content").Parse(`<h2>Tags</h2>
+<pre style="white-space:pre-wrap;">{{.Out}}</pre>`)
+			uname, _ := auth.UsernameFromRequest(r)
+			show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+			_ = t.Execute(w, map[string]any{
+				"Out":         strings.TrimSpace(res.Stdout),
+				"Active":      activeFromPath(r.URL.Path),
+				"ShowCmdLog":  show,
+				"CmdEntries":  entries,
+				"MoreURL":     moreURL,
+				"CanShowMore": canMore,
+				"ReturnURL":   ret,
+			})
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		out := strings.TrimSpace(res.Stdout)
+		if out == "" {
+			out = "Keine Tags vorhanden"
+		}
+		_, _ = w.Write([]byte(out))
+	})
 
-    s.mux.HandleFunc("/projects", func(w http.ResponseWriter, r *http.Request) {
-        username, _ := auth.UsernameFromRequest(r)
-        res := s.runner.Run(username, 5_000_000_000, "show-projects")
-        s.cmdStore.Append(username, "List projects", []string{"show-projects"})
-        if res.Err != nil && !res.TimedOut {
-            http.Error(w, res.Stderr, http.StatusBadGateway)
-            return
-        }
-        if r.URL.Query().Get("raw") != "1" {
-            // Versuche JSON zu erkennen und als Tabelle zu rendern
-            if arr, ok := decodeTasksJSONFlexible(res.Stdout); ok && len(arr) > 0 {
-                rows := make([]map[string]string, 0, len(arr))
-                for _, m := range arr {
-                    name := trimQuotes(str(firstOf(m, "name", "project")))
-                    if name == "" { continue }
-                    rows = append(rows, map[string]string{
-                        "name":          name,
-                        "taskCount":     str(firstOf(m, "taskCount")),
-                        "resolvedCount": str(firstOf(m, "resolvedCount")),
-                        "active":        str(firstOf(m, "active")),
-                        "priority":      str(firstOf(m, "priority")),
-                    })
-                }
-                if len(rows) > 0 {
-                    w.Header().Set("Content-Type", "text/html; charset=utf-8")
-                    s.renderProjectsTable(w, r, "Projects", rows)
-                    return
-                }
-            }
-            // Fallback: HTML mit Pre
-            w.Header().Set("Content-Type", "text/html; charset=utf-8")
-            t := template.Must(s.layoutTpl.Clone())
-            _, _ = t.New("content").Parse(`<h2>Projects</h2>
-<pre style="white-space:pre-wrap;">{{.Out}}</pre>`) 
-            uname, _ := auth.UsernameFromRequest(r)
-            show, entries, moreURL, canMore, ret := s.footerData(r, uname)
-            _ = t.Execute(w, map[string]any{
-                "Out": strings.TrimSpace(res.Stdout),
-                "Active": activeFromPath(r.URL.Path),
-                "ShowCmdLog": show,
-                "CmdEntries": entries,
-                "MoreURL": moreURL,
-                "CanShowMore": canMore,
-                "ReturnURL": ret,
-            })
-            return
-        }
-        w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-        out := strings.TrimSpace(res.Stdout)
-        if out == "" { out = "Keine Projekte vorhanden" }
-        _, _ = w.Write([]byte(out))
-    })
+	s.mux.HandleFunc("/projects", func(w http.ResponseWriter, r *http.Request) {
+		username, _ := auth.UsernameFromRequest(r)
+		res := s.runner.Run(username, 5_000_000_000, "show-projects")
+		s.cmdStore.Append(username, "List projects", []string{"show-projects"})
+		if res.Err != nil && !res.TimedOut {
+			http.Error(w, res.Stderr, http.StatusBadGateway)
+			return
+		}
+		if r.URL.Query().Get("raw") != "1" {
+			// Versuche JSON zu erkennen und als Tabelle zu rendern
+			if arr, ok := decodeTasksJSONFlexible(res.Stdout); ok && len(arr) > 0 {
+				rows := make([]map[string]string, 0, len(arr))
+				for _, m := range arr {
+					name := trimQuotes(str(firstOf(m, "name", "project")))
+					if name == "" {
+						continue
+					}
+					rows = append(rows, map[string]string{
+						"name":          name,
+						"taskCount":     str(firstOf(m, "taskCount")),
+						"resolvedCount": str(firstOf(m, "resolvedCount")),
+						"active":        str(firstOf(m, "active")),
+						"priority":      str(firstOf(m, "priority")),
+					})
+				}
+				if len(rows) > 0 {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					s.renderProjectsTable(w, r, "Projects", rows)
+					return
+				}
+			}
+			// Fallback: HTML mit Pre
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			t := template.Must(s.layoutTpl.Clone())
+			_, _ = t.New("content").Parse(`<h2>Projects</h2>
+<pre style="white-space:pre-wrap;">{{.Out}}</pre>`)
+			uname, _ := auth.UsernameFromRequest(r)
+			show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+			_ = t.Execute(w, map[string]any{
+				"Out":         strings.TrimSpace(res.Stdout),
+				"Active":      activeFromPath(r.URL.Path),
+				"ShowCmdLog":  show,
+				"CmdEntries":  entries,
+				"MoreURL":     moreURL,
+				"CanShowMore": canMore,
+				"ReturnURL":   ret,
+			})
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		out := strings.TrimSpace(res.Stdout)
+		if out == "" {
+			out = "Keine Projekte vorhanden"
+		}
+		_, _ = w.Write([]byte(out))
+	})
 
-    // Context anzeigen/setzen
-    s.mux.HandleFunc("/context", func(w http.ResponseWriter, r *http.Request) {
-        switch r.Method {
-        case http.MethodGet:
-            username, _ := auth.UsernameFromRequest(r)
-        res := s.runner.Run(username, 5_000_000_000, "context")
-        s.cmdStore.Append(username, "Show context", []string{"context"})
-            if res.Err != nil && !res.TimedOut {
-                http.Error(w, res.Stderr, http.StatusBadGateway)
-                return
-            }
-            w.Header().Set("Content-Type", "text/html; charset=utf-8")
-            t := template.Must(s.layoutTpl.Clone())
-            _, _ = t.New("content").Parse(`<h2>Context</h2>
+	// Context anzeigen/setzen
+	s.mux.HandleFunc("/context", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			username, _ := auth.UsernameFromRequest(r)
+			res := s.runner.Run(username, 5_000_000_000, "context")
+			s.cmdStore.Append(username, "Show context", []string{"context"})
+			if res.Err != nil && !res.TimedOut {
+				http.Error(w, res.Stderr, http.StatusBadGateway)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			t := template.Must(s.layoutTpl.Clone())
+			_, _ = t.New("content").Parse(`<h2>Context</h2>
 <pre>{{.Out}}</pre>
 <form method="post" action="/context">
   <div><label>New context (e.g. +work project:dstask): <input name="value"></label></div>
@@ -496,61 +508,61 @@ func (s *Server) routes() {
     <button type="submit" name="clear" value="1">Clear</button>
   </div>
 </form>`)
-            uname, _ := auth.UsernameFromRequest(r)
-            show, entries, moreURL, canMore, ret := s.footerData(r, uname)
-            _ = t.Execute(w, map[string]any{
-                "Out": strings.TrimSpace(res.Stdout),
-                "Active": activeFromPath(r.URL.Path),
-                "ShowCmdLog": show,
-                "CmdEntries": entries,
-                "MoreURL": moreURL,
-                "CanShowMore": canMore,
-                "ReturnURL": ret,
-            })
-        case http.MethodPost:
-            if err := r.ParseForm(); err != nil {
-                http.Error(w, "invalid form", http.StatusBadRequest)
-                return
-            }
-            username, _ := auth.UsernameFromRequest(r)
-            if r.FormValue("clear") == "1" {
-                res := s.runner.Run(username, 5_000_000_000, "context", "none")
-                s.cmdStore.Append(username, "Clear context", []string{"context", "none"})
-                if res.Err != nil && !res.TimedOut {
-                    http.Error(w, res.Stderr, http.StatusBadRequest)
-                    return
-                }
-                http.Redirect(w, r, "/context", http.StatusSeeOther)
-                return
-            }
-            val := strings.TrimSpace(r.FormValue("value"))
-            if val == "" {
-                http.Error(w, "value required", http.StatusBadRequest)
-                return
-            }
-            res := s.runner.Run(username, 5_000_000_000, "context", val)
-            s.cmdStore.Append(username, "Set context", []string{"context", val})
-            if res.Err != nil && !res.TimedOut {
-                http.Error(w, res.Stderr, http.StatusBadRequest)
-                return
-            }
-            http.Redirect(w, r, "/context", http.StatusSeeOther)
-        default:
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-        }
-    })
+			uname, _ := auth.UsernameFromRequest(r)
+			show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+			_ = t.Execute(w, map[string]any{
+				"Out":         strings.TrimSpace(res.Stdout),
+				"Active":      activeFromPath(r.URL.Path),
+				"ShowCmdLog":  show,
+				"CmdEntries":  entries,
+				"MoreURL":     moreURL,
+				"CanShowMore": canMore,
+				"ReturnURL":   ret,
+			})
+		case http.MethodPost:
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "invalid form", http.StatusBadRequest)
+				return
+			}
+			username, _ := auth.UsernameFromRequest(r)
+			if r.FormValue("clear") == "1" {
+				res := s.runner.Run(username, 5_000_000_000, "context", "none")
+				s.cmdStore.Append(username, "Clear context", []string{"context", "none"})
+				if res.Err != nil && !res.TimedOut {
+					http.Error(w, res.Stderr, http.StatusBadRequest)
+					return
+				}
+				http.Redirect(w, r, "/context", http.StatusSeeOther)
+				return
+			}
+			val := strings.TrimSpace(r.FormValue("value"))
+			if val == "" {
+				http.Error(w, "value required", http.StatusBadRequest)
+				return
+			}
+			res := s.runner.Run(username, 5_000_000_000, "context", val)
+			s.cmdStore.Append(username, "Set context", []string{"context", val})
+			if res.Err != nil && !res.TimedOut {
+				http.Error(w, res.Stderr, http.StatusBadRequest)
+				return
+			}
+			http.Redirect(w, r, "/context", http.StatusSeeOther)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
 
-    // Task erstellen (Form)
-    s.mux.HandleFunc("/tasks/new", func(w http.ResponseWriter, r *http.Request) {
-        username, _ := auth.UsernameFromRequest(r)
-        // Fetch existing projects and tags
-        projRes := s.runner.Run(username, 5_000_000_000, "show-projects")
-        tagRes := s.runner.Run(username, 5_000_000_000, "show-tags")
-        projects := parseProjectsFromOutput(projRes.Stdout)
-        tags := parseTagsFromOutput(tagRes.Stdout)
-        w.Header().Set("Content-Type", "text/html; charset=utf-8")
-        t := template.Must(s.layoutTpl.Clone())
-        _, _ = t.New("content").Parse(`
+	// Task erstellen (Form)
+	s.mux.HandleFunc("/tasks/new", func(w http.ResponseWriter, r *http.Request) {
+		username, _ := auth.UsernameFromRequest(r)
+		// Fetch existing projects and tags
+		projRes := s.runner.Run(username, 5_000_000_000, "show-projects")
+		tagRes := s.runner.Run(username, 5_000_000_000, "show-tags")
+		projects := parseProjectsFromOutput(projRes.Stdout)
+		tags := parseTagsFromOutput(tagRes.Stdout)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		t := template.Must(s.layoutTpl.Clone())
+		_, _ = t.New("content").Parse(`
 <h2>New task</h2>
 <form method="post" action="/tasks">
   <div><label>Summary: <input name="summary" required style="width:60%"></label></div>
@@ -583,137 +595,145 @@ func (s *Server) routes() {
   <div style="margin-top:8px;"><button type="submit">Create</button></div>
  </form>
         `)
-        uname, _ := auth.UsernameFromRequest(r)
-        show, entries, moreURL, canMore, ret := s.footerData(r, uname)
-        _ = t.Execute(w, map[string]any{
-            "Active": activeFromPath(r.URL.Path), "Projects": projects, "Tags": tags,
-            "ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret,
-        })
-    })
+		uname, _ := auth.UsernameFromRequest(r)
+		show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+		_ = t.Execute(w, map[string]any{
+			"Active": activeFromPath(r.URL.Path), "Projects": projects, "Tags": tags,
+			"ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret,
+		})
+	})
 
-    // Task erstellen (POST)
-    s.mux.HandleFunc("/tasks", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodPost {
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-        if err := r.ParseForm(); err != nil {
-            http.Error(w, "invalid form", http.StatusBadRequest)
-            return
-        }
-        summary := strings.TrimSpace(r.FormValue("summary"))
-        if summary == "" {
-            http.Error(w, "summary required", http.StatusBadRequest)
-            return
-        }
-        tags := strings.TrimSpace(r.FormValue("tags"))
-        project := strings.TrimSpace(r.FormValue("project"))
-        // Prefer selected existing project if provided
-        if ps := strings.TrimSpace(r.FormValue("projectSelect")); ps != "" {
-            project = ps
-        }
-        // Due: prefer date picker if present
-        dueDate := strings.TrimSpace(r.FormValue("dueDate"))
-        due := strings.TrimSpace(r.FormValue("due"))
-        if dueDate != "" {
-            due = dueDate
-        }
+	// Task erstellen (POST)
+	s.mux.HandleFunc("/tasks", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid form", http.StatusBadRequest)
+			return
+		}
+		summary := strings.TrimSpace(r.FormValue("summary"))
+		if summary == "" {
+			http.Error(w, "summary required", http.StatusBadRequest)
+			return
+		}
+		tags := strings.TrimSpace(r.FormValue("tags"))
+		project := strings.TrimSpace(r.FormValue("project"))
+		// Prefer selected existing project if provided
+		if ps := strings.TrimSpace(r.FormValue("projectSelect")); ps != "" {
+			project = ps
+		}
+		// Due: prefer date picker if present
+		dueDate := strings.TrimSpace(r.FormValue("dueDate"))
+		due := strings.TrimSpace(r.FormValue("due"))
+		if dueDate != "" {
+			due = dueDate
+		}
 
-        // Compose args per dstask add Syntax: add <summary tokens...> +tags project: due:
-        args := []string{"add"}
-        args = append(args, summaryTokens(summary)...)
-        // Collect tags from existing checkboxes
-        for _, t := range r.Form["tagsExisting"] {
-            t = strings.TrimSpace(t)
-            if t == "" { continue }
-            t = normalizeTag(t)
-            if !strings.HasPrefix(t, "+") { args = append(args, "+"+t) } else { args = append(args, t) }
-        }
-        if tags != "" {
-            for _, t := range strings.Split(tags, ",") {
-                t = strings.TrimSpace(t)
-                if t == "" { continue }
-                t = normalizeTag(t)
-                if strings.HasPrefix(t, "+") { // allow user to prefix (rare)
-                    args = append(args, t)
-                } else {
-                    args = append(args, "+"+t)
-                }
-            }
-        }
-        if project != "" {
-            args = append(args, "project:"+quoteIfNeeded(project))
-        }
-        if due != "" {
-            args = append(args, "due:"+quoteIfNeeded(due))
-        }
-        username, _ := auth.UsernameFromRequest(r)
-        res := s.runner.Run(username, 10_000_000_000, args...) // 10s
-        s.cmdStore.Append(username, "New task", append([]string{"add"}, args[1:]...))
-        if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
-            http.Error(w, res.Stderr, http.StatusBadRequest)
-            return
-        }
-        http.Redirect(w, r, "/open?html=1&ok=created", http.StatusSeeOther)
-    })
+		// Compose args per dstask add Syntax: add <summary tokens...> +tags project: due:
+		args := []string{"add"}
+		args = append(args, summaryTokens(summary)...)
+		// Collect tags from existing checkboxes
+		for _, t := range r.Form["tagsExisting"] {
+			t = strings.TrimSpace(t)
+			if t == "" {
+				continue
+			}
+			t = normalizeTag(t)
+			if !strings.HasPrefix(t, "+") {
+				args = append(args, "+"+t)
+			} else {
+				args = append(args, t)
+			}
+		}
+		if tags != "" {
+			for _, t := range strings.Split(tags, ",") {
+				t = strings.TrimSpace(t)
+				if t == "" {
+					continue
+				}
+				t = normalizeTag(t)
+				if strings.HasPrefix(t, "+") { // allow user to prefix (rare)
+					args = append(args, t)
+				} else {
+					args = append(args, "+"+t)
+				}
+			}
+		}
+		if project != "" {
+			args = append(args, "project:"+quoteIfNeeded(project))
+		}
+		if due != "" {
+			args = append(args, "due:"+quoteIfNeeded(due))
+		}
+		username, _ := auth.UsernameFromRequest(r)
+		res := s.runner.Run(username, 10_000_000_000, args...) // 10s
+		s.cmdStore.Append(username, "New task", append([]string{"add"}, args[1:]...))
+		if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
+			http.Error(w, res.Stderr, http.StatusBadRequest)
+			return
+		}
+		http.Redirect(w, r, "/open?html=1&ok=created", http.StatusSeeOther)
+	})
 
-    // Task Aktionen: /tasks/{id}/start|stop|done|remove|log|note
-    s.mux.HandleFunc("/tasks/", func(w http.ResponseWriter, r *http.Request) {
-        // Erwartet Pfad wie /tasks/123/start
-        id, action := parseTaskAction(r.URL.Path)
-        if id == "" || action == "" {
-            http.NotFound(w, r)
-            return
-        }
-        if r.Method != http.MethodPost {
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-        username, _ := auth.UsernameFromRequest(r)
-        var res dstask.Result
-        timeout := 10 * time.Second
-        switch action {
-        case "start", "stop", "done", "remove", "log":
-            // Einige dstask-Versionen bevorzugen die Syntax: dstask <action> <id>
-            res = s.runner.Run(username, timeout, action, id)
-            s.cmdStore.Append(username, "Task action", []string{action, id})
-        case "note":
-            if err := r.ParseForm(); err != nil {
-                http.Error(w, "invalid form", http.StatusBadRequest)
-                return
-            }
-            note := strings.TrimSpace(r.FormValue("note"))
-            if note == "" {
-                http.Error(w, "note required", http.StatusBadRequest)
-                return
-            }
-            // Für note: Übergabe per stdin wäre ideal; dstask akzeptiert Interaktivität.
-            // Vereinfachung: note Text direkt als Argument anhängen (dstask erlaubt dies mittels / ?)
-            // Fallback: id note und dann / als Trenner mit Text
-            // Wir nutzen: dstask <id> note <text>
-            // Für note ebenfalls: dstask note <id> <text>
-            res = s.runner.Run(username, timeout, "note", id, note)
-            s.cmdStore.Append(username, "Task action", []string{"note", id})
-        default:
-            http.NotFound(w, r)
-            return
-        }
-        if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
-            applog.Warnf("action %s failed for id=%s: code=%d timeout=%v err=%v", action, id, res.ExitCode, res.TimedOut, res.Err)
-            http.Error(w, res.Stderr, http.StatusBadRequest)
-            return
-        }
-        applog.Infof("action %s succeeded for id=%s", action, id)
-        http.Redirect(w, r, "/open?html=1&ok=action", http.StatusSeeOther)
-    })
+	// Task Aktionen: /tasks/{id}/start|stop|done|remove|log|note
+	s.mux.HandleFunc("/tasks/", func(w http.ResponseWriter, r *http.Request) {
+		// Erwartet Pfad wie /tasks/123/start
+		id, action := parseTaskAction(r.URL.Path)
+		if id == "" || action == "" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		username, _ := auth.UsernameFromRequest(r)
+		var res dstask.Result
+		timeout := 10 * time.Second
+		switch action {
+		case "start", "stop", "done", "remove", "log":
+			// Einige dstask-Versionen bevorzugen die Syntax: dstask <action> <id>
+			res = s.runner.Run(username, timeout, action, id)
+			s.cmdStore.Append(username, "Task action", []string{action, id})
+		case "note":
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "invalid form", http.StatusBadRequest)
+				return
+			}
+			note := strings.TrimSpace(r.FormValue("note"))
+			if note == "" {
+				http.Error(w, "note required", http.StatusBadRequest)
+				return
+			}
+			// Für note: Übergabe per stdin wäre ideal; dstask akzeptiert Interaktivität.
+			// Vereinfachung: note Text direkt als Argument anhängen (dstask erlaubt dies mittels / ?)
+			// Fallback: id note und dann / als Trenner mit Text
+			// Wir nutzen: dstask <id> note <text>
+			// Für note ebenfalls: dstask note <id> <text>
+			res = s.runner.Run(username, timeout, "note", id, note)
+			s.cmdStore.Append(username, "Task action", []string{"note", id})
+		default:
+			http.NotFound(w, r)
+			return
+		}
+		if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
+			applog.Warnf("action %s failed for id=%s: code=%d timeout=%v err=%v", action, id, res.ExitCode, res.TimedOut, res.Err)
+			http.Error(w, res.Stderr, http.StatusBadRequest)
+			return
+		}
+		applog.Infof("action %s succeeded for id=%s", action, id)
+		http.Redirect(w, r, "/open?html=1&ok=action", http.StatusSeeOther)
+	})
 
-    // Einfache Aktionsseite (UI-Politur): ID + Aktion auswählen
-    s.mux.HandleFunc("/tasks/action", func(w http.ResponseWriter, r *http.Request) {
-        switch r.Method {
-        case http.MethodGet:
-            w.Header().Set("Content-Type", "text/html; charset=utf-8")
-            t := template.Must(s.layoutTpl.Clone())
-            _, _ = t.New("content").Parse(`
+	// Einfache Aktionsseite (UI-Politur): ID + Aktion auswählen
+	s.mux.HandleFunc("/tasks/action", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			t := template.Must(s.layoutTpl.Clone())
+			_, _ = t.New("content").Parse(`
 <h2>Task actions</h2>
 <form method="post" action="/tasks/submit">
   <div><label>Task ID: <input name="id" required></label></div>
@@ -730,266 +750,278 @@ func (s *Server) routes() {
   <div><label>Note (for action "note"):<br><textarea name="note" rows="3" cols="40"></textarea></label></div>
   <div><button type="submit">Execute</button></div>
 </form>`)
-            uname, _ := auth.UsernameFromRequest(r)
-            show, entries, moreURL, canMore, ret := s.footerData(r, uname)
-            _ = t.Execute(w, map[string]any{
-                "Active": activeFromPath(r.URL.Path),
-                "ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret,
-            })
-        case http.MethodPost:
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-        default:
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-        }
-    })
+			uname, _ := auth.UsernameFromRequest(r)
+			show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+			_ = t.Execute(w, map[string]any{
+				"Active":     activeFromPath(r.URL.Path),
+				"ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret,
+			})
+		case http.MethodPost:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
 
-    // Submission der Aktionsseite
-    s.mux.HandleFunc("/tasks/submit", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodPost {
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-        if err := r.ParseForm(); err != nil {
-            http.Error(w, "invalid form", http.StatusBadRequest)
-            return
-        }
-        id := strings.TrimSpace(r.FormValue("id"))
-        action := strings.TrimSpace(r.FormValue("action"))
-        note := strings.TrimSpace(r.FormValue("note"))
-        if id == "" || action == "" {
-            http.Error(w, "id/action required", http.StatusBadRequest)
-            return
-        }
-        username, _ := auth.UsernameFromRequest(r)
-        timeout := 10 * time.Second
-        var res dstask.Result
-        switch action {
-        case "start", "stop", "done", "remove", "log":
-            res = s.runner.Run(username, timeout, action, id)
-        case "note":
-            if note == "" {
-                http.Error(w, "note required", http.StatusBadRequest)
-                return
-            }
-            res = s.runner.Run(username, timeout, "note", id, note)
-        default:
-            http.Error(w, "unknown action", http.StatusBadRequest)
-            return
-        }
-        if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
-            http.Error(w, res.Stderr, http.StatusBadRequest)
-            return
-        }
-        http.Redirect(w, r, "/open?html=1&ok=action", http.StatusSeeOther)
-    })
+	// Submission der Aktionsseite
+	s.mux.HandleFunc("/tasks/submit", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid form", http.StatusBadRequest)
+			return
+		}
+		id := strings.TrimSpace(r.FormValue("id"))
+		action := strings.TrimSpace(r.FormValue("action"))
+		note := strings.TrimSpace(r.FormValue("note"))
+		if id == "" || action == "" {
+			http.Error(w, "id/action required", http.StatusBadRequest)
+			return
+		}
+		username, _ := auth.UsernameFromRequest(r)
+		timeout := 10 * time.Second
+		var res dstask.Result
+		switch action {
+		case "start", "stop", "done", "remove", "log":
+			res = s.runner.Run(username, timeout, action, id)
+		case "note":
+			if note == "" {
+				http.Error(w, "note required", http.StatusBadRequest)
+				return
+			}
+			res = s.runner.Run(username, timeout, "note", id, note)
+		default:
+			http.Error(w, "unknown action", http.StatusBadRequest)
+			return
+		}
+		if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
+			http.Error(w, res.Stderr, http.StatusBadRequest)
+			return
+		}
+		http.Redirect(w, r, "/open?html=1&ok=action", http.StatusSeeOther)
+	})
 
-    // Task ändern (Project/Priority/Due/Tags)
-    s.mux.HandleFunc("/tasks/modify", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodPost {
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-        if err := r.ParseForm(); err != nil {
-            http.Error(w, "invalid form", http.StatusBadRequest)
-            return
-        }
-        id := strings.TrimSpace(r.FormValue("id"))
-        if id == "" {
-            http.Error(w, "id required", http.StatusBadRequest)
-            return
-        }
-        project := strings.TrimSpace(r.FormValue("project"))
-        priority := strings.TrimSpace(r.FormValue("priority"))
-        due := strings.TrimSpace(r.FormValue("due"))
-        addTags := strings.TrimSpace(r.FormValue("addTags"))
-        removeTags := strings.TrimSpace(r.FormValue("removeTags"))
+	// Task ändern (Project/Priority/Due/Tags)
+	s.mux.HandleFunc("/tasks/modify", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid form", http.StatusBadRequest)
+			return
+		}
+		id := strings.TrimSpace(r.FormValue("id"))
+		if id == "" {
+			http.Error(w, "id required", http.StatusBadRequest)
+			return
+		}
+		project := strings.TrimSpace(r.FormValue("project"))
+		priority := strings.TrimSpace(r.FormValue("priority"))
+		due := strings.TrimSpace(r.FormValue("due"))
+		addTags := strings.TrimSpace(r.FormValue("addTags"))
+		removeTags := strings.TrimSpace(r.FormValue("removeTags"))
 
-        args := []string{"modify"}
-        if project != "" {
-            args = append(args, "project:"+quoteIfNeeded(project))
-        }
-        if priority != "" {
-            args = append(args, priority)
-        }
-        if due != "" {
-            args = append(args, "due:"+quoteIfNeeded(due))
-        }
-        if addTags != "" {
-            for _, t := range strings.Split(addTags, ",") {
-                t = strings.TrimSpace(t)
-                if t == "" { continue }
-                t = normalizeTag(t)
-                if !strings.HasPrefix(t, "+") { t = "+"+t }
-                args = append(args, t)
-            }
-        }
-        if removeTags != "" {
-            for _, t := range strings.Split(removeTags, ",") {
-                t = strings.TrimSpace(t)
-                if t == "" { continue }
-                t = normalizeTag(t)
-                if !strings.HasPrefix(t, "-") { t = "-"+t }
-                args = append(args, t)
-            }
-        }
-        username, _ := auth.UsernameFromRequest(r)
-        // dstask modify erwartet Syntax: dstask <id> modify ... (laut usage)
-        full := append([]string{id}, args...)
-        res := s.runner.Run(username, 10*time.Second, full...)
-        if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
-            http.Error(w, res.Stderr, http.StatusBadRequest)
-            return
-        }
-        http.Redirect(w, r, "/open?html=1&ok=modified", http.StatusSeeOther)
-    })
+		args := []string{"modify"}
+		if project != "" {
+			args = append(args, "project:"+quoteIfNeeded(project))
+		}
+		if priority != "" {
+			args = append(args, priority)
+		}
+		if due != "" {
+			args = append(args, "due:"+quoteIfNeeded(due))
+		}
+		if addTags != "" {
+			for _, t := range strings.Split(addTags, ",") {
+				t = strings.TrimSpace(t)
+				if t == "" {
+					continue
+				}
+				t = normalizeTag(t)
+				if !strings.HasPrefix(t, "+") {
+					t = "+" + t
+				}
+				args = append(args, t)
+			}
+		}
+		if removeTags != "" {
+			for _, t := range strings.Split(removeTags, ",") {
+				t = strings.TrimSpace(t)
+				if t == "" {
+					continue
+				}
+				t = normalizeTag(t)
+				if !strings.HasPrefix(t, "-") {
+					t = "-" + t
+				}
+				args = append(args, t)
+			}
+		}
+		username, _ := auth.UsernameFromRequest(r)
+		// dstask modify erwartet Syntax: dstask <id> modify ... (laut usage)
+		full := append([]string{id}, args...)
+		res := s.runner.Run(username, 10*time.Second, full...)
+		if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
+			http.Error(w, res.Stderr, http.StatusBadRequest)
+			return
+		}
+		http.Redirect(w, r, "/open?html=1&ok=modified", http.StatusSeeOther)
+	})
 
-    // Version anzeigen
-    s.mux.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
-        username, _ := auth.UsernameFromRequest(r)
-        res := s.runner.Run(username, 5_000_000_000, "version")
-        s.cmdStore.Append(username, "Show version", []string{"version"})
-        if res.Err != nil && !res.TimedOut {
-            http.Error(w, res.Stderr, http.StatusBadGateway)
-            return
-        }
-        out := strings.TrimSpace(res.Stdout)
-        if out == "" {
-            out = "Unknown"
-        }
-        if r.URL.Query().Get("raw") == "1" {
-            w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-            _, _ = w.Write([]byte(out))
-            return
-        }
-        w.Header().Set("Content-Type", "text/html; charset=utf-8")
-        t := template.Must(s.layoutTpl.Clone())
-        _, _ = t.New("content").Parse(`<h2>dstask version</h2>
-<pre style="white-space:pre-wrap;">{{.Out}}</pre>`) 
-        uname, _ := auth.UsernameFromRequest(r)
-        show, entries, moreURL, canMore, ret := s.footerData(r, uname)
-        _ = t.Execute(w, map[string]any{
-            "Out": out,
-            "Active": activeFromPath(r.URL.Path),
-            "ShowCmdLog": show,
-            "CmdEntries": entries,
-            "MoreURL": moreURL,
-            "CanShowMore": canMore,
-            "ReturnURL": ret,
-        })
-    })
+	// Version anzeigen
+	s.mux.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
+		username, _ := auth.UsernameFromRequest(r)
+		res := s.runner.Run(username, 5_000_000_000, "version")
+		s.cmdStore.Append(username, "Show version", []string{"version"})
+		if res.Err != nil && !res.TimedOut {
+			http.Error(w, res.Stderr, http.StatusBadGateway)
+			return
+		}
+		out := strings.TrimSpace(res.Stdout)
+		if out == "" {
+			out = "Unknown"
+		}
+		if r.URL.Query().Get("raw") == "1" {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			_, _ = w.Write([]byte(out))
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		t := template.Must(s.layoutTpl.Clone())
+		_, _ = t.New("content").Parse(`<h2>dstask version</h2>
+<pre style="white-space:pre-wrap;">{{.Out}}</pre>`)
+		uname, _ := auth.UsernameFromRequest(r)
+		show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+		_ = t.Execute(w, map[string]any{
+			"Out":         out,
+			"Active":      activeFromPath(r.URL.Path),
+			"ShowCmdLog":  show,
+			"CmdEntries":  entries,
+			"MoreURL":     moreURL,
+			"CanShowMore": canMore,
+			"ReturnURL":   ret,
+		})
+	})
 
-    // Sync anzeigen/ausführen
-    s.mux.HandleFunc("/sync", func(w http.ResponseWriter, r *http.Request) {
-        switch r.Method {
-        case http.MethodGet:
-            w.Header().Set("Content-Type", "text/html; charset=utf-8")
-            t := template.Must(s.layoutTpl.Clone())
-            _, _ = t.New("content").Parse(`<h2>Sync</h2>
+	// Sync anzeigen/ausführen
+	s.mux.HandleFunc("/sync", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			t := template.Must(s.layoutTpl.Clone())
+			_, _ = t.New("content").Parse(`<h2>Sync</h2>
 <p>Runs <code>dstask sync</code> (pull, merge, push). The underlying repo must have a remote with an upstream branch.</p>
 <form method="post" action="/sync"><button type="submit">Sync now</button></form>`)
-            _ = t.Execute(w, nil)
-        case http.MethodPost:
-            username, _ := auth.UsernameFromRequest(r)
-            res := s.runner.Run(username, 30_000_000_000, "sync") // 30s
-            s.cmdStore.Append(username, "Sync", []string{"sync"})
-            w.Header().Set("Content-Type", "text/html; charset=utf-8")
-            t := template.Must(s.layoutTpl.Clone())
-            // Erkennung gängiger Git-Fehler für hilfreiche Hinweise
-            hint := ""
-            out := strings.TrimSpace(res.Stdout + "\n" + res.Stderr)
-            if strings.Contains(out, "There is no tracking information for the current branch") {
-                hint = `Es ist kein Upstream gesetzt. Setze ihn im .dstask-Repo, z. B.:<br>
+			_ = t.Execute(w, nil)
+		case http.MethodPost:
+			username, _ := auth.UsernameFromRequest(r)
+			res := s.runner.Run(username, 30_000_000_000, "sync") // 30s
+			s.cmdStore.Append(username, "Sync", []string{"sync"})
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			t := template.Must(s.layoutTpl.Clone())
+			// Erkennung gängiger Git-Fehler für hilfreiche Hinweise
+			hint := ""
+			out := strings.TrimSpace(res.Stdout + "\n" + res.Stderr)
+			if strings.Contains(out, "There is no tracking information for the current branch") {
+				hint = `Es ist kein Upstream gesetzt. Setze ihn im .dstask-Repo, z. B.:<br>
 <pre>git remote add origin &lt;REMOTE_URL&gt;
 git push -u origin master</pre>`
-            }
-            status := "Erfolg"
-            if res.Err != nil || res.ExitCode != 0 {
-                status = "Fehler"
-            }
-            _, _ = t.New("content").Parse(`<h2>Sync: {{.Status}}</h2>
+			}
+			status := "Erfolg"
+			if res.Err != nil || res.ExitCode != 0 {
+				status = "Fehler"
+			}
+			_, _ = t.New("content").Parse(`<h2>Sync: {{.Status}}</h2>
 {{if .Hint}}<div style="background:#fff3cd;padding:8px;border:1px solid #ffeeba;margin-bottom:8px;">{{.Hint}}</div>{{end}}
 <pre style="white-space: pre-wrap;">{{.Out}}</pre>
-<p><a href="/open?html=1">Back to list</a></p>`) 
-            _ = t.Execute(w, map[string]any{
-                "Status": status,
-                "Out":    out,
-                "Hint":   template.HTML(hint),
-                "Active": activeFromPath(r.URL.Path),
-            })
-        default:
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-        }
-    })
+<p><a href="/open?html=1">Back to list</a></p>`)
+			_ = t.Execute(w, map[string]any{
+				"Status": status,
+				"Out":    out,
+				"Hint":   template.HTML(hint),
+				"Active": activeFromPath(r.URL.Path),
+			})
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
 }
 
 // helpers to prepare footer data
 type footerEntry struct{ When, Context, Args string }
 
 func (s *Server) footerData(r *http.Request, username string) (show bool, entries []footerEntry, moreURL string, canShowMore bool, returnURL string) {
-    // cookie vs config default
-    show = s.uiCfg.ShowCommandLog
-    if c, err := r.Cookie("cmdlog"); err == nil {
-        if c.Value == "off" { show = false } else if c.Value == "on" { show = true }
-    }
-    returnURL = r.URL.Path
-    // count
-    n := 5
-    q := r.URL.Query()
-    if q.Get("all") == "1" {
-        n = 0
-    } else if q.Get("more") == "1" {
-        n = 20
-    } else {
-        canShowMore = true
-        // build moreURL preserving query but setting more=1
-        vals := r.URL.Query()
-        vals.Set("more", "1")
-        vals.Del("all")
-        moreURL = r.URL.Path + "?" + vals.Encode()
-    }
-    if !show { return }
-    raw := s.cmdStore.List(username, n)
-    entries = make([]footerEntry, 0, len(raw))
-    for _, e := range raw {
-        ts := e.When.Format("15:04:05")
-        entries = append(entries, footerEntry{When: ts, Context: e.Context, Args: ui.JoinArgs(e.Args)})
-    }
-    return
+	// cookie vs config default
+	show = s.uiCfg.ShowCommandLog
+	if c, err := r.Cookie("cmdlog"); err == nil {
+		if c.Value == "off" {
+			show = false
+		} else if c.Value == "on" {
+			show = true
+		}
+	}
+	returnURL = r.URL.Path
+	// count
+	n := 5
+	q := r.URL.Query()
+	if q.Get("all") == "1" {
+		n = 0
+	} else if q.Get("more") == "1" {
+		n = 20
+	} else {
+		canShowMore = true
+		// build moreURL preserving query but setting more=1
+		vals := r.URL.Query()
+		vals.Set("more", "1")
+		vals.Del("all")
+		moreURL = r.URL.Path + "?" + vals.Encode()
+	}
+	if !show {
+		return
+	}
+	raw := s.cmdStore.List(username, n)
+	entries = make([]footerEntry, 0, len(raw))
+	for _, e := range raw {
+		ts := e.When.Format("15:04:05")
+		entries = append(entries, footerEntry{When: ts, Context: e.Context, Args: ui.JoinArgs(e.Args)})
+	}
+	return
 }
 
 // parseTaskAction extrahiert ID und Aktion aus Pfaden wie /tasks/123/start
 func parseTaskAction(path string) (id, action string) {
-    // TrimPrefix
-    if !strings.HasPrefix(path, "/tasks/") {
-        return "", ""
-    }
-    rest := strings.TrimPrefix(path, "/tasks/")
-    parts := strings.Split(rest, "/")
-    if len(parts) < 2 {
-        return "", ""
-    }
-    id = strings.TrimSpace(parts[0])
-    action = strings.TrimSpace(parts[1])
-    if id == "" || action == "" {
-        return "", ""
-    }
-    return id, action
+	// TrimPrefix
+	if !strings.HasPrefix(path, "/tasks/") {
+		return "", ""
+	}
+	rest := strings.TrimPrefix(path, "/tasks/")
+	parts := strings.Split(rest, "/")
+	if len(parts) < 2 {
+		return "", ""
+	}
+	id = strings.TrimSpace(parts[0])
+	action = strings.TrimSpace(parts[1])
+	if id == "" || action == "" {
+		return "", ""
+	}
+	return id, action
 }
 
 func (s *Server) Handler() http.Handler {
-    // Basic Auth für alle außer /healthz
-    protected := http.NewServeMux()
-    protected.HandleFunc("/", s.mux.ServeHTTP)
+	// Basic Auth für alle außer /healthz
+	protected := http.NewServeMux()
+	protected.HandleFunc("/", s.mux.ServeHTTP)
 
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        if r.URL.Path == "/healthz" {
-            s.mux.ServeHTTP(w, r)
-            return
-        }
-        realm := fmt.Sprintf("dstask")
-        authMiddleware := auth.BasicAuthMiddleware(s.userStore, realm, protected)
-        authMiddleware.ServeHTTP(w, r)
-    })
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			s.mux.ServeHTTP(w, r)
+			return
+		}
+		realm := fmt.Sprintf("dstask")
+		authMiddleware := auth.BasicAuthMiddleware(s.userStore, realm, protected)
+		authMiddleware.ServeHTTP(w, r)
+	})
 }
-
-
