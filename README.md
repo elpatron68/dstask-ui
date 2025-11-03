@@ -1,58 +1,60 @@
-# dstask-web (Go Web-UI für dstask)
+# dstask-web (Go Web UI for dstask)
 
-Ein schlankes Web-UI zur Bedienung von `dstask` über den Browser. Implementiert in Go, mit Basic Auth, Multi-User via pro-User Repo-Zuordnung und ausführbar auf Windows.
+A lightweight web UI to operate `dstask` from the browser. Implemented in Go, with Basic Auth, per-user repo mapping, and Windows support.
 
 ## Features (MVP)
-- Basic Auth (Benutzer/Passwort via BCrypt oder ENV-Fallback)
-- Listen/Ansichten: `next`, `open`, `active`, `paused`, `resolved`
-- Tags/Projekte: `show-tags`, `show-projects`
-- Kontext anzeigen/setzen: `context`, `context none`
-- Aufgaben anlegen: `dstask add <summary +tags project: due:>`
-- Aktionen: `start`, `stop`, `done`, `remove`, `log`, `note`
+- Basic Auth (bcrypt or env fallback)
+- Views: `next`, `open`, `active`, `paused`, `resolved`
+- Taxonomy: `show-tags`, `show-projects`
+- Context: show/set via `context` / `context none`
+- Add tasks: `dstask add <summary +tags project: due:>`
+- Actions: `start`, `stop`, `done`, `remove`, `log`, `note`
 - Sync: `dstask sync`
-- HTML-Listenansicht über `?html=1` mit Inline-Aktionslinks
+- HTML list views via `?html=1` with action buttons
 
-## Voraussetzungen
+## Prerequisites
 - Go >= 1.22
-- `dstask` installiert (unter Windows z. B. `C:\tools\dstask.exe`)
-- Git für das `.dstask`-Repo
+- `dstask` installed (on Windows e.g. `C:\tools\dstask.exe`)
+- Git for the `.dstask` repo
 
 ## Build
 ```powershell
-# Aus dem Projektwurzelverzeichnis
+# from repository root
 go mod tidy
 mkdir bin 2>$null
 go build -o bin/dstask-web.exe ./cmd/dstask-web
 ```
 
-## Start (einfach, ENV-Fallback)
+## Run (simple, env fallback)
 ```powershell
 $env:DSTWEB_USER='admin'
 $env:DSTWEB_PASS='admin'
-# optional: Pfad zu dstask.exe überschreiben
+# optional: override dstask.exe path
 # $env:DSTWEB_DSTASK_BIN='C:\tools\dstask.exe'
 ./bin/dstask-web.exe
 # Browser: http://localhost:8080/
 ```
 
-## Konfiguration (`config.yaml`)
-Siehe mitgelieferte `config.yaml` (Beispiel). Felder:
+## Configuration (`config.yaml`)
+See the provided `config.yaml` for an example. Fields:
 ```yaml
-dstaskBin: "C:\\tools\\dstask.exe"   # Pfad zu dstask.exe (Windows)
-users:                                 # Optional; wenn leer, ENV-Fallback nutzen
+dstaskBin: "C:\\tools\\dstask.exe"   # path to dstask.exe (Windows)
+users:                                   # optional; if empty, env fallback is used
   - username: "admin"
-    passwordHash: "<bcrypt-hash>"      # BCrypt (z. B. Cost 10)
-repos:                                 # username -> HOME oder direkt .dstask
-  admin: "C:\\Users\\admin"         # oder: "C:\\Users\\admin\\.dstask"
+    passwordHash: "<bcrypt-hash>"        # bcrypt (e.g., cost 10)
+repos:                                   # username -> HOME or direct .dstask
+  admin: "C:\\Users\\admin"           # or: "C:\\Users\\admin\\.dstask"
+logging:
+  level: "info"                          # debug | info | warn | error
 ```
-- Wenn `users` fehlt/leer ist, werden `DSTWEB_USER`/`DSTWEB_PASS` genutzt.
-- `repos` bestimmt je User den Arbeitsbereich:
-  - Wenn Pfad ein HOME ist, verwenden wir `HOME/.dstask`.
-  - Wenn Pfad bereits auf `.dstask` zeigt, wird dieses direkt genutzt.
-- Zur Laufzeit kann `dstaskBin` via ENV überschrieben werden: `DSTWEB_DSTASK_BIN`.
+- If `users` is missing/empty, `DSTWEB_USER`/`DSTWEB_PASS` are used.
+- `repos` defines the workspace per user:
+  - If the path is a HOME dir, `HOME/.dstask` is used.
+  - If it points to `.dstask`, that directory is used directly.
+- At runtime, `dstaskBin` can be overridden via `DSTWEB_DSTASK_BIN`.
 
-### BCrypt-Hash erzeugen
-- Empfohlen: kleines Go-Snippet (lokal, nicht Teil des Projekts):
+### Generate a bcrypt hash
+Recommended: small Go snippet (local, not part of this project):
 ```go
 package main
 import (
@@ -67,13 +69,13 @@ func main(){
 ```powershell
 go run mkbcrypt.go
 ```
-Den generierten Hash in `config.yaml` als `passwordHash` eintragen.
+Place the generated hash into `config.yaml` under `passwordHash`.
 
-## `.dstask`-Repo vorbereiten
-Richte das Git-Repo im `.dstask`-Verzeichnis des jeweiligen Users ein. Entweder gemäß `repos.<user>` (falls dort `.dstask` steht) oder unter `<HOME>\.dstask`.
+## Prepare the `.dstask` repo
+Initialize the Git repo in the user's `.dstask` directory. Either as configured via `repos.<user>` (if it points to `.dstask`) or under `<HOME>\.dstask`.
 
 ```powershell
-# Beispiel: im .dstask-Verzeichnis
+# example: inside the .dstask directory
 cd C:\Users\admin\.dstask
 git init
 git add .
@@ -82,40 +84,40 @@ git remote add origin <REMOTE_URL>
 git push -u origin master
 ```
 
-Wenn `/sync` meldet „There is no tracking information for the current branch“, fehlt der Upstream:
+If `/sync` shows “There is no tracking information for the current branch”, the upstream is missing:
 ```powershell
 git branch --set-upstream-to=<remote>/<branch> master
-# oder beim ersten Push:
+# or on first push:
 # git push -u origin master
 ```
 
-## Endpunkte
-- `/` Startseite
-- `/next`, `/open`, `/active`, `/paused`, `/resolved` (Plaintext)
-  - HTML-Ansicht: `?html=1` (z. B. `/open?html=1`)
+## Endpoints
+- `/` home
+- `/next`, `/open`, `/active`, `/paused`, `/resolved` (plaintext)
+  - HTML view: `?html=1` (e.g. `/open?html=1`)
 - `/tags`, `/projects`
-- `/context` (GET zeigt, POST setzt oder löscht per `none`)
-- `/tasks/new` (Form), `POST /tasks` (anlegen)
-- `POST /tasks/{id}/{action}` mit `action` in `{start,stop,done,remove,log,note}`; für `note` Feld `note` im Body
-- `/tasks/action` (Form-UI), `POST /tasks/submit`
-- `/version`, `/sync` (GET Info, POST ausführen)
+- `/context` (GET shows, POST sets or clears with `none`)
+- `/tasks/new` (form), `POST /tasks` (create)
+- `POST /tasks/{id}/{action}` with action in `{start,stop,done,remove,log,note}`; for `note`, provide field `note`
+- `/tasks/action` (form UI), `POST /tasks/submit`
+- `/version`, `/sync` (GET info, POST run)
 
-## Windows-spezifisches
-- Der Server setzt `HOME` und `USERPROFILE` basierend auf `repos.<user>`, damit `dstask` sein Repo korrekt findet.
-- Zeilenenden werden vereinheitlicht (CRLF→LF) bevor Ausgaben gerendert werden.
+## Windows specifics
+- The server sets `HOME` and `USERPROFILE` based on `repos.<user>` so `dstask` can find its repo.
+- Line endings are normalized (CRLF→LF) before rendering output.
 
-## Sicherheit
-- Basic Auth mit BCrypt-Hashes oder ENV-Fallback
-- Whitelist der `dstask`-Kommandos, keine freie CLI
-- Zeitlimits: 5s für Listen, 10s mutierende Aktionen, 30s für Sync
+## Security
+- Basic Auth via bcrypt hashes or env fallback
+- Whitelist of allowed `dstask` commands, no arbitrary CLI
+- Timeouts: 5s for lists, 10s for mutating actions, 30s for sync
 
-## Roadmap/Nächste Schritte
-- Optionale OIDC-Auth (z. B. Azure AD)
-- Volle HTML-Tabellen mit Spalten (statt Textlisten)
-- Bessere Fehlerdarstellung (Flash-Messages)
-- Batch-Aktionen auf UI-Ebene
+## Roadmap / Next steps
+- Optional OIDC auth (e.g., Azure AD)
+- Full HTML tables with richer columns/details
+- Better error/flash messaging
+- Batch actions
 
-## Lizenz
-Siehe ursprüngliche `dstask`-Lizenz für das CLI-Tool. Dieses Web-UI ist separat lizenziert (noch festzulegen).
+## License
+MIT License. See `LICENSE`.
 
 
