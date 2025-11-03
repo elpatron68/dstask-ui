@@ -324,7 +324,7 @@ func isOverdue(due string) bool {
 // formatDateShort returns a compact, readable datetime (YYYY-MM-DD HH:MM) if parseable
 func formatDateShort(s string) string {
     t := parseTimeOrZero(s)
-    if t.IsZero() { return s }
+    if t.IsZero() { return "" }
     return t.Format("2006-01-02 15:04")
 }
 
