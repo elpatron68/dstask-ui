@@ -314,6 +314,13 @@ func ageInDays(created string) string {
     return strconv.Itoa(days)
 }
 
+// isOverdue returns true if due is a valid past time (strictly before now)
+func isOverdue(due string) bool {
+    t := parseTimeOrZero(due)
+    if t.IsZero() { return false }
+    return time.Now().After(t)
+}
+
 
 // decodeTasksJSON versucht, eine JSON-Array-Ausgabe (wie von `dstask export`) zu parsen.
 func decodeTasksJSON(raw string) ([]map[string]any, bool) {

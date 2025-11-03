@@ -47,6 +47,21 @@ nav{margin-bottom:12px}
 .cmdlog .ts{color:#6a737d}
 .cmdlog .cmd{color:#24292e;font-weight:600}
 .cmdlog .ctx{color:#111827;font-weight:600}
+table{border-collapse:collapse;width:100%}
+thead th{position:sticky;top:0;background:#f6f8fa;border-bottom:1px solid #d0d7de}
+tbody tr:nth-child(even){background:#f9fbfd}
+.badge{display:inline-block;padding:2px 6px;border-radius:12px;font-size:12px;line-height:1}
+.badge.status.active{background:#dcfce7;color:#166534}
+.badge.status.pending{background:#e0e7ff;color:#3730a3}
+.badge.status.paused{background:#fef3c7;color:#92400e}
+.badge.status.resolved{background:#e5e7eb;color:#374151}
+.badge.prio{background:#eef2ff;color:#1f2937}
+.badge.prio.P0{background:#fee2e2;color:#991b1b}
+.badge.prio.P1{background:#ffedd5;color:#9a3412}
+.badge.prio.P2{background:#dbeafe;color:#1e3a8a}
+.badge.prio.P3{background:#e5e7eb;color:#374151}
+.pill{display:inline-block;padding:2px 6px;border-radius:999px;background:#e5e7eb;color:#374151;margin-right:6px}
+.due.overdue{color:#991b1b;font-weight:600}
 </style>
 </head><body>
 <nav>

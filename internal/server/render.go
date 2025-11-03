@@ -131,7 +131,7 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
 // `rows` erwartet bereits gefilterte/aufbereitete Zeilen.
 func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title string, rows []map[string]string) {
     t := template.Must(s.layoutTpl.Clone())
-    // enrich rows with action flags based on status
+    // enrich rows with action flags and computed flags
     rowsAny := make([]map[string]any, 0, len(rows))
     for _, m := range rows {
         status := strings.ToLower(m["status"])
@@ -143,6 +143,7 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
         mm["canStart"] = canStart
         mm["canStop"] = canStop
         mm["canDone"] = canDone
+        if due, ok := m["due"]; ok { mm["overdue"] = isOverdue(due) }
         rowsAny = append(rowsAny, mm)
     }
     // sorting
@@ -183,12 +184,17 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
   {{range .Rows}}
     <tr>
       <td>{{index . "id"}}</td>
-      <td><span>{{index . "status"}}</span></td>
+      <td><span class="badge status {{index . "status"}}" title="{{index . "status"}}">{{index . "status"}}</span></td>
       <td><pre style="margin:0;white-space:pre-wrap;">{{index . "summary"}}</pre></td>
       <td>{{index . "project"}}</td>
-      <td><span>{{index . "priority"}}</span></td>
-      <td>{{index . "due"}}</td>
-      <td>{{index . "tags"}}</td>
+      <td><span class="badge prio {{index . "priority"}}" title="{{index . "priority"}}">{{index . "priority"}}</span></td>
+      <td class="due {{if .overdue}}overdue{{end}}">{{index . "due"}}</td>
+      <td>
+        {{- $tags := index . "tags" -}}
+        {{- if $tags -}}
+          {{- range (split $tags ", ") -}}<span class="pill" title="tag">{{.}}</span>{{- end -}}
+        {{- end -}}
+      </td>
       <td><code>{{index . "created"}}</code></td>
       <td><code>{{index . "resolved"}}</code></td>
       <td>{{index . "age"}}</td>
