@@ -174,18 +174,24 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
     <th style="width:80px;"><a href="{{.Sort.Priority}}">Priority</a></th>
     <th style="width:140px;"><a href="{{.Sort.Due}}">Due</a></th>
     <th style="width:220px;"><a href="{{.Sort.Tags}}">Tags</a></th>
+    <th style="width:160px;"><a href="{{.Sort.Created}}">Created</a></th>
+    <th style="width:160px;"><a href="{{.Sort.Resolved}}">Resolved</a></th>
+    <th style="width:90px;"><a href="{{.Sort.Age}}">Age</a></th>
     <th style="width:220px;">Aktionen</th>
   </tr></thead>
   <tbody>
   {{range .Rows}}
     <tr>
       <td>{{index . "id"}}</td>
-      <td>{{index . "status"}}</td>
+      <td><span>{{index . "status"}}</span></td>
       <td><pre style="margin:0;white-space:pre-wrap;">{{index . "summary"}}</pre></td>
       <td>{{index . "project"}}</td>
-      <td>{{index . "priority"}}</td>
+      <td><span>{{index . "priority"}}</span></td>
       <td>{{index . "due"}}</td>
       <td>{{index . "tags"}}</td>
+      <td><code>{{index . "created"}}</code></td>
+      <td><code>{{index . "resolved"}}</code></td>
+      <td>{{index . "age"}}</td>
       <td>
         <form method="post" action="/tasks/{{index . "id"}}/start" style="display:inline"><button type="submit" {{if not .canStart}}disabled{{end}}>start</button></form>
          · <form method="post" action="/tasks/{{index . "id"}}/done" style="display:inline"><button type="submit" {{if not .canDone}}disabled{{end}}>done</button></form>
@@ -203,6 +209,7 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
         "ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret,
         "Sort": map[string]string{
             "ID": mk("id"), "Status": mk("status"), "Summary": mk("summary"), "Project": mk("project"), "Priority": mk("priority"), "Due": mk("due"), "Tags": mk("tags"),
+            "Created": mk("created"), "Resolved": mk("resolved"), "Age": mk("age"),
         },
     })
 }

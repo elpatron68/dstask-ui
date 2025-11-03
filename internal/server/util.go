@@ -7,6 +7,7 @@ import (
     "strings"
     "sort"
     "strconv"
+    "time"
 )
 
 func getAny(m map[string]any, key string) any {
@@ -124,6 +125,8 @@ func buildRowsFromTasks(tasks []map[string]any, statusFilter string) []map[strin
         }
         id := str(firstOf(t, "id", "ID", "uuid"))
         if id == "" { continue }
+        created := trimQuotes(str(firstOf(t, "created", "Created")))
+        resolved := trimQuotes(str(firstOf(t, "resolved", "Resolved")))
         rows = append(rows, map[string]string{
             "id":       id,
             "status":   st,
@@ -132,6 +135,9 @@ func buildRowsFromTasks(tasks []map[string]any, statusFilter string) []map[strin
             "priority": str(firstOf(t, "priority")),
             "due":      trimQuotes(str(firstOf(t, "due", "dueDate"))),
             "tags":     joinTags(firstOf(t, "tags")),
+            "created":  created,
+            "resolved": resolved,
+            "age":      ageInDays(created),
         })
     }
     return rows
@@ -264,12 +270,48 @@ func SortRowsMaps(rows []map[string]string, key string, dir string) {
             rb := priorityRank(vb)
             if desc { return ra > rb }
             return ra < rb
+        case "created", "resolved":
+            ta := parseTimeOrZero(va)
+            tb := parseTimeOrZero(vb)
+            if desc { return ta.After(tb) }
+            return ta.Before(tb)
+        case "age":
+            // age in days (string) -> int compare
+            ia, _ := strconv.Atoi(va)
+            ib, _ := strconv.Atoi(vb)
+            if desc { return ia > ib }
+            return ia < ib
         default:
             if desc { return strings.ToLower(va) > strings.ToLower(vb) }
             return strings.ToLower(va) < strings.ToLower(vb)
         }
     }
     sort.SliceStable(rows, func(i, j int) bool { return cmp(rows[i], rows[j]) })
+}
+
+// parseTimeOrZero tries RFC3339 and returns zero time on failure
+func parseTimeOrZero(s string) time.Time {
+    s = strings.TrimSpace(s)
+    if s == "" || s == "0001-01-01T00:00:00Z" { return time.Time{} }
+    // common layouts
+    layouts := []string{
+        time.RFC3339Nano,
+        time.RFC3339,
+        "2006-01-02 15:04:05 -0700 MST",
+        "2006-01-02",
+    }
+    for _, layout := range layouts {
+        if t, err := time.Parse(layout, s); err == nil { return t }
+    }
+    return time.Time{}
+}
+
+// ageInDays computes full days between given time and now; zero if invalid
+func ageInDays(created string) string {
+    t := parseTimeOrZero(created)
+    if t.IsZero() { return "" }
+    days := int(time.Since(t).Hours() / 24)
+    return strconv.Itoa(days)
 }
 
 
