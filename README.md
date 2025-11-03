@@ -1,6 +1,6 @@
 # dstask-web (Go Web UI for dstask)
 
-A lightweight web UI to operate [dstask](https://github.com/naggie/dstask) from the browser. Implemented in Go, with Basic Auth, per-user repo mapping, and Windows support.
+A lightweight web UI to operate *[dstask](https://github.com/naggie/dstask)* from the browser. Implemented in Go, with Basic Auth, per-user repo mapping, and Windows support.
 
 ## Features (MVP)
 - Basic Auth (bcrypt or env fallback)
@@ -27,6 +27,14 @@ mkdir bin 2>$null
 go build -o bin/dstask-web.exe ./cmd/dstask-web
 ```
 
+### Linux/macOS
+```bash
+# from repository root
+go mod tidy
+mkdir -p bin
+go build -o bin/dstask-web ./cmd/dstask-web
+```
+
 ## Run (simple, env fallback)
 ```powershell
 $env:DSTWEB_USER='admin'
@@ -34,6 +42,16 @@ $env:DSTWEB_PASS='admin'
 # optional: override dstask.exe path
 # $env:DSTWEB_DSTASK_BIN='C:\tools\dstask.exe'
 ./bin/dstask-web.exe
+# Browser: http://localhost:8080/
+```
+
+### Linux/macOS
+```bash
+export DSTWEB_USER=admin
+export DSTWEB_PASS=admin
+# optional: override dstask binary path if not in PATH
+# export DSTWEB_DSTASK_BIN=/usr/local/bin/dstask
+./bin/dstask-web
 # Browser: http://localhost:8080/
 ```
 
@@ -52,6 +70,12 @@ ui:
   showCommandLog: true                   # show command footer by default
   commandLogMax: 200                     # ring buffer size per user
 ```
+- Linux/macOS: set `dstaskBin` to your `dstask` path if it is not in PATH, e.g. `/usr/local/bin/dstask`.
+- You can override via env at runtime:
+  - `DSTWEB_DSTASK_BIN` – absolute path to dstask
+  - `DSTWEB_LOG_LEVEL` – `debug|info|warn|error`
+  - `DSTWEB_UI_SHOW_CMDLOG` – `true|false`
+  - `DSTWEB_CMDLOG_MAX` – integer buffer size
 - If `users` is missing/empty, `DSTWEB_USER`/`DSTWEB_PASS` are used.
 - `repos` defines the workspace per user:
   - If the path is a HOME dir, `HOME/.dstask` is used.
@@ -84,6 +108,17 @@ Initialize the Git repo in the user's `.dstask` directory. Either as configured 
 ```powershell
 # example: inside the .dstask directory
 cd C:\Users\admin\.dstask
+git init
+git add .
+git commit -m "init"
+git remote add origin <REMOTE_URL>
+git push -u origin master
+```
+
+### Linux/macOS
+```bash
+# example: inside the .dstask directory
+cd "$HOME/.dstask"
 git init
 git add .
 git commit -m "init"
