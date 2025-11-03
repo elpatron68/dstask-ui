@@ -46,6 +46,7 @@ nav{margin-bottom:12px}
 .cmdlog pre{background:#fff;border:1px solid #d0d7de;padding:8px;max-height:160px;overflow:auto}
 .cmdlog .ts{color:#6a737d}
 .cmdlog .cmd{color:#24292e;font-weight:600}
+.cmdlog .ctx{color:#111827;font-weight:600}
 </style>
 </head><body>
 <nav>
@@ -71,7 +72,7 @@ nav{margin-bottom:12px}
       {{if .CanShowMore}} | <a href="{{.MoreURL}}">Show more</a>{{end}}
     </div>
   </div>
-  <pre>{{range .CmdEntries}}<span class="ts">{{.When}}</span> — {{.Context}}: <span class="cmd">dstask {{.Args}}</span>
+  <pre>{{range .CmdEntries}}<span class="ts">{{.When}}</span> — <span class="ctx">{{.Context}}:</span> <span class="cmd">dstask {{.Args}}</span>
 {{end}}</pre>
 </div>
 {{ else }}
