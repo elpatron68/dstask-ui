@@ -120,6 +120,7 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
         "Q": r.URL.Query().Get("q"),
         "Ok": r.URL.Query().Get("ok") != "",
         "Active": activeFromPath(r.URL.Path),
+        "Flash": s.getFlash(r),
         "ShowCmdLog": show,
         "CmdEntries": entries,
         "MoreURL": moreURL,
@@ -229,6 +230,7 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
     uname, _ := auth.UsernameFromRequest(r)
     show, entries, moreURL, canMore, ret := s.footerData(r, uname)
     _ = t.Execute(w, map[string]any{ "Title": title, "Rows": rowsAny, "Q": r.URL.Query().Get("q"), "Active": activeFromPath(r.URL.Path),
+        "Flash": s.getFlash(r),
         "ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret,
         "Sort": map[string]string{
             "ID": mk("id"), "Status": mk("status"), "Summary": mk("summary"), "Project": mk("project"), "Priority": mk("priority"), "Due": mk("due"), "Tags": mk("tags"),
