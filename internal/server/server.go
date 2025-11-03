@@ -10,6 +10,8 @@ import (
     "github.com/mbusc/dstask-ui/internal/auth"
     "github.com/mbusc/dstask-ui/internal/config"
     "github.com/mbusc/dstask-ui/internal/dstask"
+    applog "github.com/mbusc/dstask-ui/internal/log"
+    "github.com/mbusc/dstask-ui/internal/ui"
 )
 
 type Server struct {
@@ -18,6 +20,8 @@ type Server struct {
     layoutTpl *template.Template
     cfg       *config.Config
     runner    *dstask.Runner
+    cmdStore  *ui.CommandLogStore
+    uiCfg     config.UIConfig
 }
 
 func NewServer(userStore auth.UserStore) *Server {
@@ -25,9 +29,10 @@ func NewServer(userStore auth.UserStore) *Server {
 }
 
 func NewServerWithConfig(userStore auth.UserStore, cfg *config.Config) *Server {
-    s := &Server{userStore: userStore, cfg: cfg}
+    s := &Server{userStore: userStore, cfg: cfg, uiCfg: cfg.UI}
     s.runner = dstask.NewRunner(cfg)
     s.mux = http.NewServeMux()
+    s.cmdStore = ui.NewCommandLogStore(cfg.UI.CommandLogMax)
 
     // Templates: minimal inline for MVP skeleton; real templates folgen in späteren To-dos
     s.layoutTpl = template.Must(template.New("layout").Parse(`<!doctype html><html><head><meta charset="utf-8"><title>dstask</title>
@@ -36,6 +41,11 @@ body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,
 nav a{padding:6px 10px; text-decoration:none; color:#0366d6; border-radius:4px}
 nav a.active{background:#0366d6;color:#fff}
 nav{margin-bottom:12px}
+.cmdlog{margin-top:16px;border-top:1px solid #eee;padding-top:8px}
+.cmdlog .hdr{display:flex;justify-content:space-between;align-items:center}
+.cmdlog pre{background:#fff;border:1px solid #d0d7de;padding:8px;max-height:160px;overflow:auto}
+.cmdlog .ts{color:#6a737d}
+.cmdlog .cmd{color:#24292e;font-weight:600}
 </style>
 </head><body>
 <nav>
@@ -52,6 +62,23 @@ nav{margin-bottom:12px}
   <a href="/version" class="{{if eq .Active "version"}}active{{end}}">Version</a>
 </nav>
 {{ template "content" . }}
+{{ if .ShowCmdLog }}
+<div class="cmdlog">
+  <div class="hdr">
+    <strong>Recent dstask commands</strong>
+    <div>
+      <a href="/__cmdlog?show=0&return={{.ReturnURL}}">Hide</a>
+      {{if .CanShowMore}} | <a href="{{.MoreURL}}">Show more</a>{{end}}
+    </div>
+  </div>
+  <pre>{{range .CmdEntries}}<span class="ts">{{.When}}</span> — {{.Context}}: <span class="cmd">dstask {{.Args}}</span>
+{{end}}</pre>
+</div>
+{{ else }}
+<div class="cmdlog">
+  <a href="/__cmdlog?show=1&return={{.ReturnURL}}">Show recent dstask commands</a>
+</div>
+{{ end }}
 </body></html>`))
 
     s.routes()
@@ -59,6 +86,18 @@ nav{margin-bottom:12px}
 }
 
 func (s *Server) routes() {
+    // Toggle command log visibility via cookie
+    s.mux.HandleFunc("/__cmdlog", func(w http.ResponseWriter, r *http.Request) {
+        show := r.URL.Query().Get("show")
+        ret := r.URL.Query().Get("return")
+        if show == "0" {
+            http.SetCookie(w, &http.Cookie{Name: "cmdlog", Value: "off", Path: "/", MaxAge: 86400 * 365})
+        } else if show == "1" {
+            http.SetCookie(w, &http.Cookie{Name: "cmdlog", Value: "on", Path: "/", MaxAge: 86400 * 365})
+        }
+        if ret == "" { ret = "/" }
+        http.Redirect(w, r, ret, http.StatusSeeOther)
+    })
     s.mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
         w.Header().Set("Content-Type", "text/plain; charset=utf-8")
         _, _ = w.Write([]byte("ok"))
@@ -75,6 +114,7 @@ func (s *Server) routes() {
 
     s.mux.HandleFunc("/next", func(w http.ResponseWriter, r *http.Request) {
         username, _ := auth.UsernameFromRequest(r)
+        s.cmdStore.Append(username, "List next tasks", []string{"next"})
         if r.URL.Query().Get("html") == "1" {
             exp := s.runner.Run(username, 5_000_000_000, "export")
             if exp.Err == nil && exp.ExitCode == 0 && !exp.TimedOut {
@@ -118,6 +158,7 @@ func (s *Server) routes() {
 
     s.mux.HandleFunc("/open", func(w http.ResponseWriter, r *http.Request) {
         username, _ := auth.UsernameFromRequest(r)
+        s.cmdStore.Append(username, "List open tasks", []string{"show-open"})
         if r.URL.Query().Get("html") == "1" {
             // Primär: export rohen JSON-Text holen und parsen (robuster, da wir Json sehen)
             exp := s.runner.Run(username, 5_000_000_000, "export")
@@ -207,6 +248,7 @@ func (s *Server) routes() {
 
     s.mux.HandleFunc("/active", func(w http.ResponseWriter, r *http.Request) {
         username, _ := auth.UsernameFromRequest(r)
+        s.cmdStore.Append(username, "List active tasks", []string{"show-active"})
         if r.URL.Query().Get("html") == "1" {
             exp := s.runner.Run(username, 5_000_000_000, "export")
             if exp.Err == nil && exp.ExitCode == 0 && !exp.TimedOut {
@@ -250,6 +292,7 @@ func (s *Server) routes() {
 
     s.mux.HandleFunc("/paused", func(w http.ResponseWriter, r *http.Request) {
         username, _ := auth.UsernameFromRequest(r)
+        s.cmdStore.Append(username, "List paused tasks", []string{"show-paused"})
         if r.URL.Query().Get("html") == "1" {
             exp := s.runner.Run(username, 5_000_000_000, "export")
             if exp.Err == nil && exp.ExitCode == 0 && !exp.TimedOut {
@@ -293,6 +336,7 @@ func (s *Server) routes() {
 
     s.mux.HandleFunc("/resolved", func(w http.ResponseWriter, r *http.Request) {
         username, _ := auth.UsernameFromRequest(r)
+        s.cmdStore.Append(username, "List resolved tasks", []string{"show-resolved"})
         if r.URL.Query().Get("html") == "1" {
             exp := s.runner.Run(username, 5_000_000_000, "export")
             if exp.Err == nil && exp.ExitCode == 0 && !exp.TimedOut {
@@ -337,6 +381,7 @@ func (s *Server) routes() {
     s.mux.HandleFunc("/tags", func(w http.ResponseWriter, r *http.Request) {
         username, _ := auth.UsernameFromRequest(r)
         res := s.runner.Run(username, 5_000_000_000, "show-tags")
+        s.cmdStore.Append(username, "List tags", []string{"show-tags"})
         if res.Err != nil && !res.TimedOut {
             http.Error(w, res.Stderr, http.StatusBadGateway)
             return
@@ -358,6 +403,7 @@ func (s *Server) routes() {
     s.mux.HandleFunc("/projects", func(w http.ResponseWriter, r *http.Request) {
         username, _ := auth.UsernameFromRequest(r)
         res := s.runner.Run(username, 5_000_000_000, "show-projects")
+        s.cmdStore.Append(username, "List projects", []string{"show-projects"})
         if res.Err != nil && !res.TimedOut {
             http.Error(w, res.Stderr, http.StatusBadGateway)
             return
@@ -402,7 +448,8 @@ func (s *Server) routes() {
         switch r.Method {
         case http.MethodGet:
             username, _ := auth.UsernameFromRequest(r)
-            res := s.runner.Run(username, 5_000_000_000, "context")
+        res := s.runner.Run(username, 5_000_000_000, "context")
+        s.cmdStore.Append(username, "Show context", []string{"context"})
             if res.Err != nil && !res.TimedOut {
                 http.Error(w, res.Stderr, http.StatusBadGateway)
                 return
@@ -427,6 +474,7 @@ func (s *Server) routes() {
             username, _ := auth.UsernameFromRequest(r)
             if r.FormValue("clear") == "1" {
                 res := s.runner.Run(username, 5_000_000_000, "context", "none")
+                s.cmdStore.Append(username, "Clear context", []string{"context", "none"})
                 if res.Err != nil && !res.TimedOut {
                     http.Error(w, res.Stderr, http.StatusBadRequest)
                     return
@@ -440,6 +488,7 @@ func (s *Server) routes() {
                 return
             }
             res := s.runner.Run(username, 5_000_000_000, "context", val)
+            s.cmdStore.Append(username, "Set context", []string{"context", val})
             if res.Err != nil && !res.TimedOut {
                 http.Error(w, res.Stderr, http.StatusBadRequest)
                 return
@@ -554,6 +603,7 @@ func (s *Server) routes() {
         }
         username, _ := auth.UsernameFromRequest(r)
         res := s.runner.Run(username, 10_000_000_000, args...) // 10s
+        s.cmdStore.Append(username, "New task", append([]string{"add"}, args[1:]...))
         if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
             http.Error(w, res.Stderr, http.StatusBadRequest)
             return
@@ -580,6 +630,7 @@ func (s *Server) routes() {
         case "start", "stop", "done", "remove", "log":
             // Einige dstask-Versionen bevorzugen die Syntax: dstask <action> <id>
             res = s.runner.Run(username, timeout, action, id)
+            s.cmdStore.Append(username, "Task action", []string{action, id})
         case "note":
             if err := r.ParseForm(); err != nil {
                 http.Error(w, "invalid form", http.StatusBadRequest)
@@ -596,14 +647,17 @@ func (s *Server) routes() {
             // Wir nutzen: dstask <id> note <text>
             // Für note ebenfalls: dstask note <id> <text>
             res = s.runner.Run(username, timeout, "note", id, note)
+            s.cmdStore.Append(username, "Task action", []string{"note", id})
         default:
             http.NotFound(w, r)
             return
         }
         if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
+            applog.Warnf("action %s failed for id=%s: code=%d timeout=%v err=%v", action, id, res.ExitCode, res.TimedOut, res.Err)
             http.Error(w, res.Stderr, http.StatusBadRequest)
             return
         }
+        applog.Infof("action %s succeeded for id=%s", action, id)
         http.Redirect(w, r, "/open?html=1&ok=action", http.StatusSeeOther)
     })
 
@@ -742,6 +796,7 @@ func (s *Server) routes() {
     s.mux.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
         username, _ := auth.UsernameFromRequest(r)
         res := s.runner.Run(username, 5_000_000_000, "version")
+        s.cmdStore.Append(username, "Show version", []string{"version"})
         if res.Err != nil && !res.TimedOut {
             http.Error(w, res.Stderr, http.StatusBadGateway)
             return
@@ -763,6 +818,7 @@ func (s *Server) routes() {
         case http.MethodPost:
             username, _ := auth.UsernameFromRequest(r)
             res := s.runner.Run(username, 30_000_000_000, "sync") // 30s
+            s.cmdStore.Append(username, "Sync", []string{"sync"})
             w.Header().Set("Content-Type", "text/html; charset=utf-8")
             t := template.Must(s.layoutTpl.Clone())
             // Erkennung gängiger Git-Fehler für hilfreiche Hinweise
@@ -791,6 +847,41 @@ git push -u origin master</pre>`
             http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
         }
     })
+}
+
+// helpers to prepare footer data
+type footerEntry struct{ When, Context, Args string }
+
+func (s *Server) footerData(r *http.Request, username string) (show bool, entries []footerEntry, moreURL string, canShowMore bool, returnURL string) {
+    // cookie vs config default
+    show = s.uiCfg.ShowCommandLog
+    if c, err := r.Cookie("cmdlog"); err == nil {
+        if c.Value == "off" { show = false } else if c.Value == "on" { show = true }
+    }
+    returnURL = r.URL.Path
+    // count
+    n := 5
+    q := r.URL.Query()
+    if q.Get("all") == "1" {
+        n = 0
+    } else if q.Get("more") == "1" {
+        n = 20
+    } else {
+        canShowMore = true
+        // build moreURL preserving query but setting more=1
+        vals := r.URL.Query()
+        vals.Set("more", "1")
+        vals.Del("all")
+        moreURL = r.URL.Path + "?" + vals.Encode()
+    }
+    if !show { return }
+    raw := s.cmdStore.List(username, n)
+    entries = make([]footerEntry, 0, len(raw))
+    for _, e := range raw {
+        ts := e.When.Format("15:04:05")
+        entries = append(entries, footerEntry{When: ts, Context: e.Context, Args: ui.JoinArgs(e.Args)})
+    }
+    return
 }
 
 // parseTaskAction extrahiert ID und Aktion aus Pfaden wie /tasks/123/start

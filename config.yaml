@@ -1,25 +1,28 @@
-# Beispielkonfiguration für dstask-web (Go Web-UI für dstask)
+# Example configuration for dstask-web (Go Web UI for dstask)
 #
-# Hinweise:
-# - Wenn keine Benutzer hier konfiguriert sind, greift der Fallback über ENV:
-#   DSTWEB_USER und DSTWEB_PASS (Standard: admin/admin).
-# - Für Windows sollte der Pfad zu dstask.exe gesetzt sein.
-# - Repos ordnen Login-Benutzern ihr HOME oder direkt das .dstask-Verzeichnis zu.
+# Notes:
+# - If no users are configured here, environment fallback is used:
+#   DSTWEB_USER and DSTWEB_PASS (default: admin/admin).
+# - On Windows, set the path to dstask.exe.
+# - Repos map login users to their HOME or directly to the .dstask directory.
 
 dstaskBin: "C:\\tools\\dstask.exe"
 
-# Benutzer (Basic Auth). passwordHash ist ein BCrypt-Hash (z. B. Cost 10).
-# Falls du hier nichts angibst, nutze stattdessen ENV (DSTWEB_USER/DSTWEB_PASS).
+# Users (Basic Auth). passwordHash is a bcrypt hash (e.g., cost 10).
+# If omitted, ENV fallback is used (DSTWEB_USER/DSTWEB_PASS).
 users:
   # - username: "admin"
   #   passwordHash: "<bcrypt-hash-hier-einfuegen>"
 
-# Zuordnung Benutzer -> Repo-Pfad. Entweder HOME (wir verwenden dann HOME/.dstask)
-# oder direkt das .dstask-Verzeichnis.
+# Mapping user -> repo path. Either HOME (we will use HOME/.dstask)
+# or directly the .dstask directory.
 repos:
-  # Beispiel 1 (HOME):
+  # Example 1 (HOME):
   # admin: "C:\\Users\\admin"
-  # Beispiel 2 (direkt .dstask):
+  # Example 2 (direct .dstask):
   # admin: "C:\\Users\\admin\\.dstask"
   admin: "C:\\Users\\mbusc\\.dstask"
+
+logging:
+  level: "info"   # debug | info | warn | error
 

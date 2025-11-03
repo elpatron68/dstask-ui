@@ -1,12 +1,13 @@
 package main
 
 import (
-	"log"
+	stdlog "log"
 	"net/http"
 	"os"
 
 	"github.com/mbusc/dstask-ui/internal/auth"
 	"github.com/mbusc/dstask-ui/internal/config"
+	applog "github.com/mbusc/dstask-ui/internal/log"
 	"github.com/mbusc/dstask-ui/internal/server"
 )
 
@@ -18,8 +19,11 @@ func main() {
 	// Config laden (optional config.yaml)
 	cfg, err := config.Load("")
 	if err != nil {
-		log.Fatalf("config error: %v", err)
+		stdlog.Fatalf("config error: %v", err)
 	}
+
+	// Init logging
+	applog.InitFromEnvFallback(cfg.Logging.Level)
 
 	userStore := auth.NewInMemoryUserStore()
 	// Benutzer aus Datei
@@ -28,21 +32,21 @@ func main() {
 			continue
 		}
 		if err := userStore.AddUserHash(u.Username, []byte(u.PasswordHash)); err != nil {
-			log.Fatalf("invalid user in config: %v", err)
+			stdlog.Fatalf("invalid user in config: %v", err)
 		}
 	}
 	// Fallback-User aus ENV, wenn keiner definiert
 	if len(cfg.Users) == 0 {
 		if err := userStore.AddUserPlain(username, password); err != nil {
-			log.Fatalf("failed to add default user: %v", err)
+			stdlog.Fatalf("failed to add default user: %v", err)
 		}
 	}
 
 	srv := server.NewServerWithConfig(userStore, cfg)
 
-	log.Printf("dstask web UI listening on %s", listenAddr)
+	stdlog.Printf("dstask web UI listening on %s", listenAddr)
 	if err := http.ListenAndServe(listenAddr, srv.Handler()); err != nil {
-		log.Fatalf("server error: %v", err)
+		stdlog.Fatalf("server error: %v", err)
 	}
 }
 

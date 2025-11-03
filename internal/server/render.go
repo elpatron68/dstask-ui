@@ -5,6 +5,7 @@ import (
     "net/http"
     "regexp"
     "strings"
+    "github.com/mbusc/dstask-ui/internal/auth"
 )
 
 var idLineRe = regexp.MustCompile(`^\s*(\d+)\b`)
@@ -21,7 +22,7 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
   <button type="submit">Filter</button>
 </form>
 <table border="1" cellpadding="4" cellspacing="0">
-  <thead><tr><th style="width:64px;">ID</th><th style="width:90px;">Status</th><th>Text</th><th style="width:220px;">Aktionen</th></tr></thead>
+  <thead><tr><th style="width:64px;">ID</th><th style="width:90px;">Status</th><th>Text</th><th style="width:220px;">Actions</th></tr></thead>
   <tbody>
   {{range .Rows}}
     {{if .IsTask}}
@@ -79,12 +80,19 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
         return
     }
 
+    uname, _ := auth.UsernameFromRequest(r)
+    show, entries, moreURL, canMore, ret := s.footerData(r, uname)
     _ = t.Execute(w, map[string]any{
         "Title": title,
         "Rows":  rows,
         "Q": r.URL.Query().Get("q"),
         "Ok": r.URL.Query().Get("ok") != "",
         "Active": activeFromPath(r.URL.Path),
+        "ShowCmdLog": show,
+        "CmdEntries": entries,
+        "MoreURL": moreURL,
+        "CanShowMore": canMore,
+        "ReturnURL": ret,
     })
 }
 
@@ -131,7 +139,10 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
   </tbody>
 </table>
 `)
-    _ = t.Execute(w, map[string]any{ "Title": title, "Rows": rows, "Q": r.URL.Query().Get("q"), "Active": activeFromPath(r.URL.Path) })
+    uname, _ := auth.UsernameFromRequest(r)
+    show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+    _ = t.Execute(w, map[string]any{ "Title": title, "Rows": rows, "Q": r.URL.Query().Get("q"), "Active": activeFromPath(r.URL.Path),
+        "ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret })
 }
 
 // renderProjectsTable rendert eine Tabelle für Projekte
@@ -160,7 +171,10 @@ func (s *Server) renderProjectsTable(w http.ResponseWriter, r *http.Request, tit
   </tbody>
 </table>
 `)
-    _ = t.Execute(w, map[string]any{ "Title": title, "Rows": rows, "Active": activeFromPath(r.URL.Path) })
+    uname, _ := auth.UsernameFromRequest(r)
+    show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+    _ = t.Execute(w, map[string]any{ "Title": title, "Rows": rows, "Active": activeFromPath(r.URL.Path),
+        "ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret })
 }
 
 // escapeExceptBasic lässt die eingefügten Aktionslinks intakt, escaped sonst HTML.

@@ -8,9 +8,9 @@ import (
     "os"
     "strings"
     "time"
-    "log"
 
     "github.com/mbusc/dstask-ui/internal/config"
+    applog "github.com/mbusc/dstask-ui/internal/log"
 )
 
 type Runner struct {
@@ -71,7 +71,7 @@ func (r *Runner) Run(username string, timeout time.Duration, args ...string) Res
     cmd.Stdout = &outBuf
     cmd.Stderr = &errBuf
 
-    log.Printf("dstask run: %s %s", bin, strings.Join(args, " "))
+    applog.Debugf("dstask run: %s %s", bin, strings.Join(args, " "))
     runErr := cmd.Run()
     res := Result{
         Stdout: normalizeNewlines(outBuf.String()),
@@ -88,7 +88,11 @@ func (r *Runner) Run(username string, timeout time.Duration, args ...string) Res
     } else {
         res.ExitCode = -1
     }
-    log.Printf("dstask exit: code=%d timeout=%v stderr=%q", res.ExitCode, res.TimedOut, truncate(res.Stderr, 300))
+    if res.ExitCode != 0 || res.TimedOut {
+        applog.Warnf("dstask exit: code=%d timeout=%v stderr=%q", res.ExitCode, res.TimedOut, truncate(res.Stderr, 300))
+    } else {
+        applog.Debugf("dstask exit: code=%d", res.ExitCode)
+    }
     return res
 }
 
