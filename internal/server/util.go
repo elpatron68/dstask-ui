@@ -5,6 +5,8 @@ import (
     "encoding/json"
     "regexp"
     "strings"
+    "sort"
+    "strconv"
 )
 
 func getAny(m map[string]any, key string) any {
@@ -233,6 +235,43 @@ func trimQuotes(s string) string {
     }
     return s
 }
+
+// sort helpers
+func priorityRank(p string) int {
+    switch strings.ToUpper(p) {
+    case "P0": return 0
+    case "P1": return 1
+    case "P2": return 2
+    case "P3": return 3
+    default: return 99
+    }
+}
+
+func SortRowsMaps(rows []map[string]string, key string, dir string) {
+    if key == "" { return }
+    desc := strings.ToLower(dir) == "desc"
+    cmp := func(a, b map[string]string) bool {
+        va := a[key]
+        vb := b[key]
+        switch key {
+        case "id", "taskCount", "resolvedCount":
+            ia, _ := strconv.Atoi(va)
+            ib, _ := strconv.Atoi(vb)
+            if desc { return ia > ib }
+            return ia < ib
+        case "priority":
+            ra := priorityRank(va)
+            rb := priorityRank(vb)
+            if desc { return ra > rb }
+            return ra < rb
+        default:
+            if desc { return strings.ToLower(va) > strings.ToLower(vb) }
+            return strings.ToLower(va) < strings.ToLower(vb)
+        }
+    }
+    sort.SliceStable(rows, func(i, j int) bool { return cmp(rows[i], rows[j]) })
+}
+
 
 // decodeTasksJSON versucht, eine JSON-Array-Ausgabe (wie von `dstask export`) zu parsen.
 func decodeTasksJSON(raw string) ([]map[string]any, bool) {

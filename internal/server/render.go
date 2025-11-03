@@ -6,6 +6,7 @@ import (
     "regexp"
     "strings"
     "github.com/mbusc/dstask-ui/internal/auth"
+    "sort"
 )
 
 var idLineRe = regexp.MustCompile(`^\s*(\d+)\b`)
@@ -22,7 +23,12 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
   <button type="submit">Filter</button>
 </form>
 <table border="1" cellpadding="4" cellspacing="0">
-  <thead><tr><th style="width:64px;">ID</th><th style="width:90px;">Status</th><th>Text</th><th style="width:220px;">Actions</th></tr></thead>
+  <thead><tr>
+    <th style="width:64px;"><a href="{{.Sort.ID}}">ID</a></th>
+    <th style="width:90px;"><a href="{{.Sort.Status}}">Status</a></th>
+    <th><a href="{{.Sort.Text}}">Text</a></th>
+    <th style="width:220px;">Actions</th>
+  </tr></thead>
   <tbody>
   {{range .Rows}}
     {{if .IsTask}}
@@ -80,6 +86,30 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
         return
     }
 
+    // sort rows (id/status/text)
+    sortKey := r.URL.Query().Get("sort")
+    sortDir := r.URL.Query().Get("dir")
+    sort.SliceStable(rows, func(i, j int) bool {
+        less := false
+        switch sortKey {
+        case "id":
+            less = rows[i].ID < rows[j].ID
+        case "status":
+            less = strings.ToLower(rows[i].Status) < strings.ToLower(rows[j].Status)
+        case "text":
+            less = strings.ToLower(rows[i].Text) < strings.ToLower(rows[j].Text)
+        default:
+            return rows[i].ID < rows[j].ID
+        }
+        if strings.ToLower(sortDir) == "desc" { return !less }
+        return less
+    })
+    mk := func(col string) string {
+        q := r.URL.Query(); dir := q.Get("dir")
+        if q.Get("sort") == col { if strings.ToLower(dir)=="asc"{dir="desc"} else {dir="asc"} } else { dir="asc" }
+        q.Set("sort", col); q.Set("dir", dir); q.Set("html","1")
+        return r.URL.Path + "?" + q.Encode()
+    }
     uname, _ := auth.UsernameFromRequest(r)
     show, entries, moreURL, canMore, ret := s.footerData(r, uname)
     _ = t.Execute(w, map[string]any{
@@ -93,6 +123,7 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
         "MoreURL": moreURL,
         "CanShowMore": canMore,
         "ReturnURL": ret,
+        "Sort": map[string]string{"ID": mk("id"), "Status": mk("status"), "Text": mk("text")},
     })
 }
 
@@ -100,6 +131,19 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
 // `rows` erwartet bereits gefilterte/aufbereitete Zeilen.
 func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title string, rows []map[string]string) {
     t := template.Must(s.layoutTpl.Clone())
+    // sorting
+    sortKey := r.URL.Query().Get("sort")
+    sortDir := r.URL.Query().Get("dir")
+    SortRowsMaps(rows, sortKey, sortDir)
+    mk := func(col string) string {
+        q := r.URL.Query()
+        dir := q.Get("dir")
+        if q.Get("sort") == col {
+            if strings.ToLower(dir) == "asc" { dir = "desc" } else { dir = "asc" }
+        } else { dir = "asc" }
+        q.Set("sort", col); q.Set("dir", dir); q.Set("html", "1")
+        return r.URL.Path + "?" + q.Encode()
+    }
     _, _ = t.New("content").Parse(`
 <h2>{{.Title}}</h2>
 <form method="get" style="margin-bottom:8px">
@@ -109,13 +153,13 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
 </form>
 <table border="1" cellpadding="4" cellspacing="0">
   <thead><tr>
-    <th style="width:64px;">ID</th>
-    <th style="width:90px;">Status</th>
-    <th>Summary</th>
-    <th>Project</th>
-    <th style="width:80px;">Priority</th>
-    <th style="width:140px;">Due</th>
-    <th style="width:220px;">Tags</th>
+    <th style="width:64px;"><a href="{{.Sort.ID}}">ID</a></th>
+    <th style="width:90px;"><a href="{{.Sort.Status}}">Status</a></th>
+    <th><a href="{{.Sort.Summary}}">Summary</a></th>
+    <th><a href="{{.Sort.Project}}">Project</a></th>
+    <th style="width:80px;"><a href="{{.Sort.Priority}}">Priority</a></th>
+    <th style="width:140px;"><a href="{{.Sort.Due}}">Due</a></th>
+    <th style="width:220px;"><a href="{{.Sort.Tags}}">Tags</a></th>
     <th style="width:220px;">Aktionen</th>
   </tr></thead>
   <tbody>
@@ -142,21 +186,32 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
     uname, _ := auth.UsernameFromRequest(r)
     show, entries, moreURL, canMore, ret := s.footerData(r, uname)
     _ = t.Execute(w, map[string]any{ "Title": title, "Rows": rows, "Q": r.URL.Query().Get("q"), "Active": activeFromPath(r.URL.Path),
-        "ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret })
+        "ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret,
+        "Sort": map[string]string{
+            "ID": mk("id"), "Status": mk("status"), "Summary": mk("summary"), "Project": mk("project"), "Priority": mk("priority"), "Due": mk("due"), "Tags": mk("tags"),
+        },
+    })
 }
 
 // renderProjectsTable rendert eine Tabelle für Projekte
 func (s *Server) renderProjectsTable(w http.ResponseWriter, r *http.Request, title string, rows []map[string]string) {
     t := template.Must(s.layoutTpl.Clone())
+    SortRowsMaps(rows, r.URL.Query().Get("sort"), r.URL.Query().Get("dir"))
+    mk := func(col string) string {
+        q := r.URL.Query(); dir := q.Get("dir")
+        if q.Get("sort") == col { if strings.ToLower(dir)=="asc"{dir="desc"} else {dir="asc"} } else { dir="asc" }
+        q.Set("sort", col); q.Set("dir", dir)
+        return r.URL.Path + "?" + q.Encode()
+    }
     _, _ = t.New("content").Parse(`
 <h2>{{.Title}}</h2>
 <table border="1" cellpadding="4" cellspacing="0">
   <thead><tr>
-    <th>Project</th>
-    <th style="width:100px;">Open</th>
-    <th style="width:120px;">Resolved</th>
-    <th style="width:90px;">Active</th>
-    <th style="width:80px;">Priority</th>
+    <th><a href="{{.Sort.Name}}">Project</a></th>
+    <th style="width:100px;"><a href="{{.Sort.Open}}">Open</a></th>
+    <th style="width:120px;"><a href="{{.Sort.Resolved}}">Resolved</a></th>
+    <th style="width:90px;"><a href="{{.Sort.Active}}">Active</a></th>
+    <th style="width:80px;"><a href="{{.Sort.Priority}}">Priority</a></th>
   </tr></thead>
   <tbody>
   {{range .Rows}}
@@ -174,7 +229,9 @@ func (s *Server) renderProjectsTable(w http.ResponseWriter, r *http.Request, tit
     uname, _ := auth.UsernameFromRequest(r)
     show, entries, moreURL, canMore, ret := s.footerData(r, uname)
     _ = t.Execute(w, map[string]any{ "Title": title, "Rows": rows, "Active": activeFromPath(r.URL.Path),
-        "ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret })
+        "ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret,
+        "Sort": map[string]string{ "Name": mk("name"), "Open": mk("taskCount"), "Resolved": mk("resolvedCount"), "Active": mk("active"), "Priority": mk("priority") },
+    })
 }
 
 // escapeExceptBasic lässt die eingefügten Aktionslinks intakt, escaped sonst HTML.
