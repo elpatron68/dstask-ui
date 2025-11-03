@@ -188,7 +188,6 @@ git branch --set-upstream-to=<remote>/<branch> master
 ## Roadmap / Next steps
 
 - Optional OIDC auth (e.g., Azure AD)
-- Better error/flash messaging (done for basic cases)
 - Batch actions (initial set implemented)
 
 ## License
