@@ -604,9 +604,11 @@ func (s *Server) routes() {
 				res := s.runner.Run(username, 5_000_000_000, "context", "none")
 				s.cmdStore.Append(username, "Clear context", []string{"context", "none"})
 				if res.Err != nil && !res.TimedOut {
-					http.Error(w, res.Stderr, http.StatusBadRequest)
+					s.setFlash(w, "error", "Failed to clear context")
+					http.Redirect(w, r, "/context", http.StatusSeeOther)
 					return
 				}
+				s.setFlash(w, "success", "Context cleared")
 				http.Redirect(w, r, "/context", http.StatusSeeOther)
 				return
 			}
@@ -618,9 +620,11 @@ func (s *Server) routes() {
 			res := s.runner.Run(username, 5_000_000_000, "context", val)
 			s.cmdStore.Append(username, "Set context", []string{"context", val})
 			if res.Err != nil && !res.TimedOut {
-				http.Error(w, res.Stderr, http.StatusBadRequest)
+				s.setFlash(w, "error", "Failed to set context")
+				http.Redirect(w, r, "/context", http.StatusSeeOther)
 				return
 			}
+			s.setFlash(w, "success", "Context set")
 			http.Redirect(w, r, "/context", http.StatusSeeOther)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -746,10 +750,12 @@ func (s *Server) routes() {
 		res := s.runner.Run(username, 10_000_000_000, args...) // 10s
 		s.cmdStore.Append(username, "New task", append([]string{"add"}, args[1:]...))
 		if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
-			http.Error(w, res.Stderr, http.StatusBadRequest)
+			s.setFlash(w, "error", "Failed to create task")
+			http.Redirect(w, r, "/tasks/new", http.StatusSeeOther)
 			return
 		}
-		http.Redirect(w, r, "/open?html=1&ok=created", http.StatusSeeOther)
+		s.setFlash(w, "success", "Task created")
+		http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
 	})
 
 	// Task Aktionen: /tasks/{id}/start|stop|done|remove|log|note
@@ -795,11 +801,13 @@ func (s *Server) routes() {
 		}
 		if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
 			applog.Warnf("action %s failed for id=%s: code=%d timeout=%v err=%v", action, id, res.ExitCode, res.TimedOut, res.Err)
-			http.Error(w, res.Stderr, http.StatusBadRequest)
+			s.setFlash(w, "error", "Task action failed")
+			http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
 			return
 		}
 		applog.Infof("action %s succeeded for id=%s", action, id)
-		http.Redirect(w, r, "/open?html=1&ok=action", http.StatusSeeOther)
+		s.setFlash(w, "success", "Task action applied")
+		http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
 	})
 
 	// Einfache Aktionsseite (UI-Politur): ID + Aktion auswählen
@@ -875,7 +883,8 @@ func (s *Server) routes() {
 			http.Error(w, res.Stderr, http.StatusBadRequest)
 			return
 		}
-		http.Redirect(w, r, "/open?html=1&ok=action", http.StatusSeeOther)
+		s.setFlash(w, "success", "Task action applied")
+		http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
 	})
 
 	// Task ändern (Project/Priority/Due/Tags)
@@ -943,7 +952,8 @@ func (s *Server) routes() {
 			http.Error(w, res.Stderr, http.StatusBadRequest)
 			return
 		}
-		http.Redirect(w, r, "/open?html=1&ok=modified", http.StatusSeeOther)
+		s.setFlash(w, "success", "Task modified")
+		http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
 	})
 
 	// Version anzeigen
