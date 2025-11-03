@@ -145,6 +145,7 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
         for k, v := range m { mm[k] = v }
         if cs, ok := m["created"]; ok { mm["created"] = formatDateShort(cs) }
         if rs, ok := m["resolved"]; ok { mm["resolved"] = formatDateShort(rs) }
+        if ds, ok := m["due"]; ok { mm["due"] = formatDateShort(ds) }
         mm["canStart"] = canStart
         mm["canStop"] = canStop
         mm["canDone"] = canDone
