@@ -3,6 +3,7 @@
 A lightweight web UI to operate *[dstask](https://github.com/naggie/dstask)* from the browser. Implemented in Go, with Basic Auth, per-user repo mapping, and Windows support.
 
 ## Features (MVP)
+
 - Basic Auth (bcrypt or env fallback)
 - Views: `next`, `open`, `active`, `paused`, `resolved`
 - Taxonomy: `show-tags`, `show-projects`
@@ -15,19 +16,15 @@ A lightweight web UI to operate *[dstask](https://github.com/naggie/dstask)* fro
 - Enhanced New Task form: select existing project or enter new, pick tags or add new, date picker for due
 
 ## Prerequisites
+
 - Go >= 1.22
 - `dstask` installed (on Windows e.g. `C:\tools\dstask.exe`)
 - Git for the `.dstask` repo
 
 ## Build
-```powershell
-# from repository root
-go mod tidy
-mkdir bin 2>$null
-go build -o bin/dstask-web.exe ./cmd/dstask-web
-```
 
 ### Linux/macOS
+
 ```bash
 # from repository root
 go mod tidy
@@ -35,17 +32,19 @@ mkdir -p bin
 go build -o bin/dstask-web ./cmd/dstask-web
 ```
 
-## Run (simple, env fallback)
+### Windows
+
 ```powershell
-$env:DSTWEB_USER='admin'
-$env:DSTWEB_PASS='admin'
-# optional: override dstask.exe path
-# $env:DSTWEB_DSTASK_BIN='C:\tools\dstask.exe'
-./bin/dstask-web.exe
-# Browser: http://localhost:8080/
+# from repository root
+go mod tidy
+mkdir bin 2>$null
+go build -o bin/dstask-web.exe ./cmd/dstask-web
 ```
 
+## Run (simple, env fallback)
+
 ### Linux/macOS
+
 ```bash
 export DSTWEB_USER=admin
 export DSTWEB_PASS=admin
@@ -55,8 +54,21 @@ export DSTWEB_PASS=admin
 # Browser: http://localhost:8080/
 ```
 
+### Windows
+
+```powershell
+$env:DSTWEB_USER='admin'
+$env:DSTWEB_PASS='admin'
+# optional: override dstask.exe path
+# $env:DSTWEB_DSTASK_BIN='C:\tools\dstask.exe'
+./bin/dstask-web.exe
+# Browser: http://localhost:8080/
+```
+
 ## Configuration (`config.yaml`)
+
 See the provided `config.yaml` for an example. Fields:
+
 ```yaml
 dstaskBin: "C:\\tools\\dstask.exe"   # path to dstask.exe (Windows)
 users:                                   # optional; if empty, env fallback is used
@@ -85,6 +97,7 @@ ui:
 - Command log UI can be overridden via `DSTWEB_UI_SHOW_CMDLOG` (true/false) and `DSTWEB_CMDLOG_MAX` (int).
 
 ### Generate a bcrypt hash
+
 Recommended: small Go snippet (local, not part of this project):
 ```go
 package main
@@ -97,13 +110,29 @@ func main(){
     fmt.Println(string(h))
 }
 ```
+
 ```powershell
 go run mkbcrypt.go
 ```
+
 Place the generated hash into `config.yaml` under `passwordHash`.
 
 ## Prepare the `.dstask` repo
 Initialize the Git repo in the user's `.dstask` directory. Either as configured via `repos.<user>` (if it points to `.dstask`) or under `<HOME>\.dstask`.
+
+### Linux/macOS
+
+```bash
+# example: inside the .dstask directory
+cd "$HOME/.dstask"
+git init
+git add .
+git commit -m "init"
+git remote add origin <REMOTE_URL>
+git push -u origin master
+```
+
+### Windows
 
 ```powershell
 # example: inside the .dstask directory
@@ -115,18 +144,8 @@ git remote add origin <REMOTE_URL>
 git push -u origin master
 ```
 
-### Linux/macOS
-```bash
-# example: inside the .dstask directory
-cd "$HOME/.dstask"
-git init
-git add .
-git commit -m "init"
-git remote add origin <REMOTE_URL>
-git push -u origin master
-```
-
 If `/sync` shows “There is no tracking information for the current branch”, the upstream is missing:
+
 ```powershell
 git branch --set-upstream-to=<remote>/<branch> master
 # or on first push:
@@ -134,6 +153,7 @@ git branch --set-upstream-to=<remote>/<branch> master
 ```
 
 ## Endpoints
+
 - `/` home
 - `/next`, `/open`, `/active`, `/paused`, `/resolved` (plaintext)
   - HTML view: `?html=1` (e.g. `/open?html=1`)
@@ -145,26 +165,31 @@ git branch --set-upstream-to=<remote>/<branch> master
 - `/version`, `/sync` (GET info, POST run)
 
 ### Command log footer
+
 - Visible on all HTML views by default; shows last 5 dstask commands (time, context, command).
 - "Show more" expands to 20; add `all=1` query to show all.
 - Toggle persists via cookie: links toggle between hide/show.
 
 ## Windows specifics
+
 - The server sets `HOME` and `USERPROFILE` based on `repos.<user>` so `dstask` can find its repo.
 - Line endings are normalized (CRLF→LF) before rendering output.
 
 ## Security
+
 - Basic Auth via bcrypt hashes or env fallback
 - Whitelist of allowed `dstask` commands, no arbitrary CLI
 - Timeouts: 5s for lists, 10s for mutating actions, 30s for sync
 
 ## Roadmap / Next steps
+
 - Optional OIDC auth (e.g., Azure AD)
 - Full HTML tables with richer columns/details
 - Better error/flash messaging
 - Batch actions
 
 ## License
+
 MIT License. See `LICENSE`.
 
 
