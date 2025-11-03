@@ -24,7 +24,6 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
 </form>
 <table border="1" cellpadding="4" cellspacing="0">
   <thead><tr>
-    <th style="width:28px;"><input type="checkbox" onclick="for(const el of document.querySelectorAll('input[name=ids]')) el.checked=this.checked" title="Select all"/></th>
     <th style="width:64px;"><a href="{{.Sort.ID}}">ID</a></th>
     <th style="width:90px;"><a href="{{.Sort.Status}}">Status</a></th>
     <th><a href="{{.Sort.Text}}">Text</a></th>
