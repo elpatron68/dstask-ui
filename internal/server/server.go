@@ -110,7 +110,16 @@ func (s *Server) routes() {
         _, _ = t.New("content").Parse(`<h1>dstask Web UI</h1><p>Signed in as: {{.User}}</p>
 <form method="post" action="/sync" style="margin-top:8px"><button type="submit">Sync</button></form>`) // placeholder
         username, _ := auth.UsernameFromRequest(r)
-        _ = t.Execute(w, map[string]any{"User": username, "Active": activeFromPath(r.URL.Path)})
+        show, entries, moreURL, canMore, ret := s.footerData(r, username)
+        _ = t.Execute(w, map[string]any{
+            "User": username,
+            "Active": activeFromPath(r.URL.Path),
+            "ShowCmdLog": show,
+            "CmdEntries": entries,
+            "MoreURL": moreURL,
+            "CanShowMore": canMore,
+            "ReturnURL": ret,
+        })
     })
 
     s.mux.HandleFunc("/next", func(w http.ResponseWriter, r *http.Request) {
