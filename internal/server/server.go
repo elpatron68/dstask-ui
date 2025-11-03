@@ -842,8 +842,30 @@ func (s *Server) routes() {
             http.Error(w, res.Stderr, http.StatusBadGateway)
             return
         }
-        w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-        _, _ = w.Write([]byte(strings.TrimSpace(res.Stdout)))
+        out := strings.TrimSpace(res.Stdout)
+        if out == "" {
+            out = "Unknown"
+        }
+        if r.URL.Query().Get("raw") == "1" {
+            w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+            _, _ = w.Write([]byte(out))
+            return
+        }
+        w.Header().Set("Content-Type", "text/html; charset=utf-8")
+        t := template.Must(s.layoutTpl.Clone())
+        _, _ = t.New("content").Parse(`<h2>dstask version</h2>
+<pre style="white-space:pre-wrap;">{{.Out}}</pre>`) 
+        uname, _ := auth.UsernameFromRequest(r)
+        show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+        _ = t.Execute(w, map[string]any{
+            "Out": out,
+            "Active": activeFromPath(r.URL.Path),
+            "ShowCmdLog": show,
+            "CmdEntries": entries,
+            "MoreURL": moreURL,
+            "CanShowMore": canMore,
+            "ReturnURL": ret,
+        })
     })
 
     // Sync anzeigen/ausführen
