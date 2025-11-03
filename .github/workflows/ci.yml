@@ -8,6 +8,10 @@ on:
     branches: [ "**" ]
   workflow_dispatch:
 
+# Ensure GITHUB_TOKEN can create releases
+permissions:
+  contents: write
+
 jobs:
   test:
     name: Test (Go)
@@ -89,5 +93,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/**/*
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
