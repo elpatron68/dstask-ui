@@ -34,8 +34,11 @@ func NewServerWithConfig(userStore auth.UserStore, cfg *config.Config) *Server {
 	s.mux = http.NewServeMux()
 	s.cmdStore = ui.NewCommandLogStore(cfg.UI.CommandLogMax)
 
-	// Templates: minimal inline for MVP skeleton; real templates folgen in späteren To-dos
-	s.layoutTpl = template.Must(template.New("layout").Parse(`<!doctype html><html><head><meta charset="utf-8"><title>dstask</title>
+	// Templates: register helpers (e.g., split)
+	baseTpl := template.New("layout").Funcs(template.FuncMap{
+		"split": func(s, sep string) []string { return strings.Split(s, sep) },
+	})
+	s.layoutTpl = template.Must(baseTpl.Parse(`<!doctype html><html><head><meta charset="utf-8"><title>dstask</title>
 <style>
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;margin:16px}
 nav a{padding:6px 10px; text-decoration:none; color:#0366d6; border-radius:4px}
@@ -50,7 +53,9 @@ nav{margin-bottom:12px}
 table{border-collapse:collapse;width:100%}
 thead th{position:sticky;top:0;background:#f6f8fa;border-bottom:1px solid #d0d7de}
 tbody tr:nth-child(even){background:#f9fbfd}
-.badge{display:inline-block;padding:2px 6px;border-radius:12px;font-size:12px;line-height:1}
+.table-mono, .table-mono th, .table-mono td, table, th, td {font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
+table, th, td, table pre {font-size:13px}
+.badge{display:inline-block;padding:2px 6px;border-radius:12px;font-size:inherit;line-height:1}
 .badge.status.active{background:#dcfce7;color:#166534}
 .badge.status.pending{background:#e0e7ff;color:#3730a3}
 .badge.status.paused{background:#fef3c7;color:#92400e}
@@ -60,7 +65,7 @@ tbody tr:nth-child(even){background:#f9fbfd}
 .badge.prio.P1{background:#ffedd5;color:#9a3412}
 .badge.prio.P2{background:#dbeafe;color:#1e3a8a}
 .badge.prio.P3{background:#e5e7eb;color:#374151}
-.pill{display:inline-block;padding:2px 6px;border-radius:999px;background:#e5e7eb;color:#374151;margin-right:6px}
+.pill{display:inline-block;padding:2px 6px;border-radius:999px;background:#e5e7eb;color:#374151;margin-right:6px;font-size:inherit}
 .due.overdue{color:#991b1b;font-weight:600}
 </style>
 </head><body>
@@ -78,6 +83,11 @@ tbody tr:nth-child(even){background:#f9fbfd}
   <a href="/tasks/action" class="{{if eq .Active "action"}}active{{end}}">Actions</a>
   <a href="/version" class="{{if eq .Active "version"}}active{{end}}">Version</a>
 </nav>
+{{ if .Flash }}
+<div class="flash {{.Flash.Type}}" style="margin:10px 0;padding:8px;border:1px solid #d0d7de; border-left-width:4px; background:#fff;">
+  {{.Flash.Text}}
+</div>
+{{ end }}
 {{ template "content" . }}
 {{ if .ShowCmdLog }}
 <div class="cmdlog">
@@ -103,6 +113,54 @@ tbody tr:nth-child(even){background:#f9fbfd}
 }
 
 func (s *Server) routes() {
+	// Batch actions
+	s.mux.HandleFunc("/tasks/batch", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid form", http.StatusBadRequest)
+			return
+		}
+		ids := r.Form["ids"]
+		action := strings.TrimSpace(r.FormValue("action"))
+		note := strings.TrimSpace(r.FormValue("note"))
+		if len(ids) == 0 || action == "" {
+			http.Error(w, "ids/action required", http.StatusBadRequest)
+			return
+		}
+		username, _ := auth.UsernameFromRequest(r)
+		var ok, skipped, failed int
+		for _, id := range ids {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			var res dstask.Result
+			switch action {
+			case "start", "stop", "done", "remove", "log":
+				res = s.runner.Run(username, 10*time.Second, action, id)
+			case "note":
+				if note == "" {
+					skipped++
+					continue
+				}
+				res = s.runner.Run(username, 10*time.Second, "note", id, note)
+			default:
+				skipped++
+				continue
+			}
+			if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
+				failed++
+			} else {
+				ok++
+			}
+		}
+		msg := fmt.Sprintf("Batch %s: %d ok, %d skipped, %d failed", action, ok, skipped, failed)
+		s.setFlash(w, "info", msg)
+		http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
+	})
 	// Toggle command log visibility via cookie
 	s.mux.HandleFunc("/__cmdlog", func(w http.ResponseWriter, r *http.Request) {
 		show := r.URL.Query().Get("show")
@@ -132,6 +190,7 @@ func (s *Server) routes() {
 		_ = t.Execute(w, map[string]any{
 			"User":        username,
 			"Active":      activeFromPath(r.URL.Path),
+			"Flash":       s.getFlash(r),
 			"ShowCmdLog":  show,
 			"CmdEntries":  entries,
 			"MoreURL":     moreURL,
@@ -206,6 +265,9 @@ func (s *Server) routes() {
 							"project":  trimQuotes(str(firstOf(t, "project", "Project"))),
 							"priority": str(firstOf(t, "priority", "Priority")),
 							"due":      trimQuotes(str(firstOf(t, "due", "Due", "dueDate", "DueDate"))),
+							"created":  trimQuotes(str(firstOf(t, "created", "Created"))),
+							"resolved": trimQuotes(str(firstOf(t, "resolved", "Resolved"))),
+							"age":      ageInDays(trimQuotes(str(firstOf(t, "created", "Created")))),
 							"tags":     joinTags(firstOf(t, "tags", "Tags")),
 						})
 					}
@@ -245,6 +307,9 @@ func (s *Server) routes() {
 						"project":  trimQuotes(str(firstOf(t, "project"))),
 						"priority": str(firstOf(t, "priority")),
 						"due":      trimQuotes(str(firstOf(t, "due"))),
+						"created":  trimQuotes(str(firstOf(t, "created"))),
+						"resolved": trimQuotes(str(firstOf(t, "resolved"))),
+						"age":      ageInDays(trimQuotes(str(firstOf(t, "created")))),
 						"tags":     joinTags(firstOf(t, "tags")),
 					})
 				}
@@ -428,6 +493,7 @@ func (s *Server) routes() {
 			_ = t.Execute(w, map[string]any{
 				"Out":         strings.TrimSpace(res.Stdout),
 				"Active":      activeFromPath(r.URL.Path),
+				"Flash":       s.getFlash(r),
 				"ShowCmdLog":  show,
 				"CmdEntries":  entries,
 				"MoreURL":     moreURL,
@@ -485,6 +551,7 @@ func (s *Server) routes() {
 			_ = t.Execute(w, map[string]any{
 				"Out":         strings.TrimSpace(res.Stdout),
 				"Active":      activeFromPath(r.URL.Path),
+				"Flash":       s.getFlash(r),
 				"ShowCmdLog":  show,
 				"CmdEntries":  entries,
 				"MoreURL":     moreURL,
@@ -528,6 +595,7 @@ func (s *Server) routes() {
 			_ = t.Execute(w, map[string]any{
 				"Out":         strings.TrimSpace(res.Stdout),
 				"Active":      activeFromPath(r.URL.Path),
+				"Flash":       s.getFlash(r),
 				"ShowCmdLog":  show,
 				"CmdEntries":  entries,
 				"MoreURL":     moreURL,
@@ -544,9 +612,11 @@ func (s *Server) routes() {
 				res := s.runner.Run(username, 5_000_000_000, "context", "none")
 				s.cmdStore.Append(username, "Clear context", []string{"context", "none"})
 				if res.Err != nil && !res.TimedOut {
-					http.Error(w, res.Stderr, http.StatusBadRequest)
+					s.setFlash(w, "error", "Failed to clear context")
+					http.Redirect(w, r, "/context", http.StatusSeeOther)
 					return
 				}
+				s.setFlash(w, "success", "Context cleared")
 				http.Redirect(w, r, "/context", http.StatusSeeOther)
 				return
 			}
@@ -558,9 +628,11 @@ func (s *Server) routes() {
 			res := s.runner.Run(username, 5_000_000_000, "context", val)
 			s.cmdStore.Append(username, "Set context", []string{"context", val})
 			if res.Err != nil && !res.TimedOut {
-				http.Error(w, res.Stderr, http.StatusBadRequest)
+				s.setFlash(w, "error", "Failed to set context")
+				http.Redirect(w, r, "/context", http.StatusSeeOther)
 				return
 			}
+			s.setFlash(w, "success", "Context set")
 			http.Redirect(w, r, "/context", http.StatusSeeOther)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -686,10 +758,12 @@ func (s *Server) routes() {
 		res := s.runner.Run(username, 10_000_000_000, args...) // 10s
 		s.cmdStore.Append(username, "New task", append([]string{"add"}, args[1:]...))
 		if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
-			http.Error(w, res.Stderr, http.StatusBadRequest)
+			s.setFlash(w, "error", "Failed to create task")
+			http.Redirect(w, r, "/tasks/new", http.StatusSeeOther)
 			return
 		}
-		http.Redirect(w, r, "/open?html=1&ok=created", http.StatusSeeOther)
+		s.setFlash(w, "success", "Task created")
+		http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
 	})
 
 	// Task Aktionen: /tasks/{id}/start|stop|done|remove|log|note
@@ -735,11 +809,13 @@ func (s *Server) routes() {
 		}
 		if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
 			applog.Warnf("action %s failed for id=%s: code=%d timeout=%v err=%v", action, id, res.ExitCode, res.TimedOut, res.Err)
-			http.Error(w, res.Stderr, http.StatusBadRequest)
+			s.setFlash(w, "error", "Task action failed")
+			http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
 			return
 		}
 		applog.Infof("action %s succeeded for id=%s", action, id)
-		http.Redirect(w, r, "/open?html=1&ok=action", http.StatusSeeOther)
+		s.setFlash(w, "success", "Task action applied")
+		http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
 	})
 
 	// Einfache Aktionsseite (UI-Politur): ID + Aktion auswählen
@@ -815,7 +891,8 @@ func (s *Server) routes() {
 			http.Error(w, res.Stderr, http.StatusBadRequest)
 			return
 		}
-		http.Redirect(w, r, "/open?html=1&ok=action", http.StatusSeeOther)
+		s.setFlash(w, "success", "Task action applied")
+		http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
 	})
 
 	// Task ändern (Project/Priority/Due/Tags)
@@ -883,7 +960,8 @@ func (s *Server) routes() {
 			http.Error(w, res.Stderr, http.StatusBadRequest)
 			return
 		}
-		http.Redirect(w, r, "/open?html=1&ok=modified", http.StatusSeeOther)
+		s.setFlash(w, "success", "Task modified")
+		http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
 	})
 
 	// Version anzeigen
@@ -913,6 +991,7 @@ func (s *Server) routes() {
 		_ = t.Execute(w, map[string]any{
 			"Out":         out,
 			"Active":      activeFromPath(r.URL.Path),
+			"Flash":       s.getFlash(r),
 			"ShowCmdLog":  show,
 			"CmdEntries":  entries,
 			"MoreURL":     moreURL,
@@ -958,6 +1037,7 @@ git push -u origin master</pre>`
 				"Out":    out,
 				"Hint":   template.HTML(hint),
 				"Active": activeFromPath(r.URL.Path),
+				"Flash":  s.getFlash(r),
 			})
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1005,6 +1085,40 @@ func (s *Server) footerData(r *http.Request, username string) (show bool, entrie
 	}
 	return
 }
+
+// flash support
+type flash struct{ Type, Text string }
+
+func (s *Server) setFlash(w http.ResponseWriter, typ, text string) {
+	if typ == "" {
+		typ = "info"
+	}
+	// simple cookie, short-lived
+	http.SetCookie(w, &http.Cookie{Name: "flash", Value: urlQueryEscape(typ + "|" + text), Path: "/", MaxAge: 5})
+}
+
+func (s *Server) getFlash(r *http.Request) *flash {
+	c, err := r.Cookie("flash")
+	if err != nil || c.Value == "" {
+		return nil
+	}
+	val := urlQueryUnescape(c.Value)
+	parts := strings.SplitN(val, "|", 2)
+	f := &flash{}
+	if len(parts) == 2 {
+		f.Type = parts[0]
+		f.Text = parts[1]
+	} else {
+		f.Type = "info"
+		f.Text = val
+	}
+	return f
+}
+
+func urlQueryEscape(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "|", "/"), "\n", " ")
+}
+func urlQueryUnescape(s string) string { return s }
 
 // parseTaskAction extrahiert ID und Aktion aus Pfaden wie /tasks/123/start
 func parseTaskAction(path string) (id, action string) {

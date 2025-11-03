@@ -15,6 +15,8 @@ A lightweight web UI to operate *[dstask](https://github.com/naggie/dstask)* fro
 - Rich HTML tables (`?html=1`) with sortable columns, status/priority badges, tag pills, and overdue highlighting
 - Recent dstask commands footer with timestamps (configurable, per-user)
 - Enhanced New Task form: select existing project or enter new, pick tags or add new, date picker for due
+- Flash messages for success/error on actions
+- Batch actions with multi-select (start/stop/done/remove/note)
 
 ## Prerequisites
 
@@ -163,6 +165,7 @@ git branch --set-upstream-to=<remote>/<branch> master
 - `/tasks/new` (form), `POST /tasks` (create)
 - `POST /tasks/{id}/{action}` with action in `{start,stop,done,remove,log,note}`; for `note`, provide field `note`
 - `/tasks/action` (form UI), `POST /tasks/submit`
+- `POST /tasks/batch` (batch actions for selected IDs)
 - `/version`, `/sync` (GET info, POST run)
 
 ### Command log footer
@@ -185,8 +188,7 @@ git branch --set-upstream-to=<remote>/<branch> master
 ## Roadmap / Next steps
 
 - Optional OIDC auth (e.g., Azure AD)
-- Better error/flash messaging
-- Batch actions
+- Batch actions (initial set implemented)
 
 ## License
 

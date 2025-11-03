@@ -24,6 +24,7 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
 </form>
 <table border="1" cellpadding="4" cellspacing="0">
   <thead><tr>
+    <th style="width:28px;"></th>
     <th style="width:64px;"><a href="{{.Sort.ID}}">ID</a></th>
     <th style="width:90px;"><a href="{{.Sort.Status}}">Status</a></th>
     <th><a href="{{.Sort.Text}}">Text</a></th>
@@ -33,6 +34,7 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
   {{range .Rows}}
     {{if .IsTask}}
       <tr>
+        <td></td>
         <td>{{.ID}}</td>
         <td>{{.Status}}</td>
         <td><pre style="margin:0;white-space:pre-wrap;">{{.Text}}</pre></td>
@@ -44,7 +46,7 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
         </td>
       </tr>
     {{else}}
-      <tr><td colspan="4"><pre style="margin:0;white-space:pre-wrap;">{{.Text}}</pre></td></tr>
+      <tr><td colspan="5"><pre style="margin:0;white-space:pre-wrap;">{{.Text}}</pre></td></tr>
     {{end}}
   {{end}}
   </tbody>
@@ -118,6 +120,7 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
         "Q": r.URL.Query().Get("q"),
         "Ok": r.URL.Query().Get("ok") != "",
         "Active": activeFromPath(r.URL.Path),
+        "Flash": s.getFlash(r),
         "ShowCmdLog": show,
         "CmdEntries": entries,
         "MoreURL": moreURL,
@@ -140,6 +143,9 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
         canDone := status != "resolved" && status != "done"
         mm := map[string]any{}
         for k, v := range m { mm[k] = v }
+        if cs, ok := m["created"]; ok { mm["created"] = formatDateShort(cs) }
+        if rs, ok := m["resolved"]; ok { mm["resolved"] = formatDateShort(rs) }
+        if ds, ok := m["due"]; ok { mm["due"] = formatDateShort(ds) }
         mm["canStart"] = canStart
         mm["canStop"] = canStop
         mm["canDone"] = canDone
@@ -168,6 +174,7 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
 </form>
 <table border="1" cellpadding="4" cellspacing="0">
   <thead><tr>
+    <th style="width:28px;"></th>
     <th style="width:64px;"><a href="{{.Sort.ID}}">ID</a></th>
     <th style="width:90px;"><a href="{{.Sort.Status}}">Status</a></th>
     <th><a href="{{.Sort.Summary}}">Summary</a></th>
@@ -183,6 +190,7 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
   <tbody>
   {{range .Rows}}
     <tr>
+      <td><input type="checkbox" name="ids" value="{{index . "id"}}" form="batchForm"/></td>
       <td>{{index . "id"}}</td>
       <td><span class="badge status {{index . "status"}}" title="{{index . "status"}}">{{index . "status"}}</span></td>
       <td><pre style="margin:0;white-space:pre-wrap;">{{index . "summary"}}</pre></td>
@@ -208,10 +216,24 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
   {{end}}
   </tbody>
 </table>
+<form id="batchForm" method="post" action="/tasks/batch" style="margin-top:8px;">
+  <label>Batch action:
+    <select name="action">
+      <option value="start">start</option>
+      <option value="stop">stop</option>
+      <option value="done">done</option>
+      <option value="remove">remove</option>
+      <option value="note">note</option>
+    </select>
+  </label>
+  <label style="margin-left:8px;">Note: <input name="note" placeholder="for action 'note'"/></label>
+  <button type="submit" style="margin-left:8px;">Apply</button>
+</form>
 `)
     uname, _ := auth.UsernameFromRequest(r)
     show, entries, moreURL, canMore, ret := s.footerData(r, uname)
     _ = t.Execute(w, map[string]any{ "Title": title, "Rows": rowsAny, "Q": r.URL.Query().Get("q"), "Active": activeFromPath(r.URL.Path),
+        "Flash": s.getFlash(r),
         "ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret,
         "Sort": map[string]string{
             "ID": mk("id"), "Status": mk("status"), "Summary": mk("summary"), "Project": mk("project"), "Priority": mk("priority"), "Due": mk("due"), "Tags": mk("tags"),
