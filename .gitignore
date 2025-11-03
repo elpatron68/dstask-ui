@@ -1,0 +1,34 @@
+# Build artifacts
+/bin/
+/dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Logs and coverage
+*.log
+coverage.out
+
+# Editor/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Go modules cache (should not appear here, but just in case)
+/vendor/
+
+# Node/Yarn (if added later)
+node_modules/
+
+# Env files
+.env
+.env.*
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+
+
