@@ -83,11 +83,6 @@ table, th, td, table pre {font-size:13px}
   <a href="/tasks/action" class="{{if eq .Active "action"}}active{{end}}">Actions</a>
   <a href="/version" class="{{if eq .Active "version"}}active{{end}}">Version</a>
 </nav>
-{{ if .Flash }}
-<div class="flash {{.Flash.Type}}" style="margin:10px 0;padding:8px;border:1px solid #d0d7de; border-left-width:4px; background:#fff;">
-  {{.Flash.Text}}
-</div>
-{{ end }}
 {{ template "content" . }}
 {{ if .ShowCmdLog }}
 <div class="cmdlog">
@@ -104,6 +99,11 @@ table, th, td, table pre {font-size:13px}
 {{ else }}
 <div class="cmdlog">
   <a href="/__cmdlog?show=1&return={{.ReturnURL}}">Show recent dstask commands</a>
+</div>
+{{ end }}
+{{ if .Flash }}
+<div class="flash {{.Flash.Type}}" style="margin:10px 0;padding:8px;border:1px solid #d0d7de; border-left-width:4px; background:#fff;">
+  {{.Flash.Text}}
 </div>
 {{ end }}
 </body></html>`))
