@@ -54,7 +54,8 @@ table{border-collapse:collapse;width:100%}
 thead th{position:sticky;top:0;background:#f6f8fa;border-bottom:1px solid #d0d7de}
 tbody tr:nth-child(even){background:#f9fbfd}
 .table-mono, .table-mono th, .table-mono td, table, th, td {font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
-.badge{display:inline-block;padding:2px 6px;border-radius:12px;font-size:12px;line-height:1}
+table, th, td, table pre {font-size:13px}
+.badge{display:inline-block;padding:2px 6px;border-radius:12px;font-size:inherit;line-height:1}
 .badge.status.active{background:#dcfce7;color:#166534}
 .badge.status.pending{background:#e0e7ff;color:#3730a3}
 .badge.status.paused{background:#fef3c7;color:#92400e}
@@ -64,7 +65,7 @@ tbody tr:nth-child(even){background:#f9fbfd}
 .badge.prio.P1{background:#ffedd5;color:#9a3412}
 .badge.prio.P2{background:#dbeafe;color:#1e3a8a}
 .badge.prio.P3{background:#e5e7eb;color:#374151}
-.pill{display:inline-block;padding:2px 6px;border-radius:999px;background:#e5e7eb;color:#374151;margin-right:6px}
+.pill{display:inline-block;padding:2px 6px;border-radius:999px;background:#e5e7eb;color:#374151;margin-right:6px;font-size:inherit}
 .due.overdue{color:#991b1b;font-weight:600}
 </style>
 </head><body>
