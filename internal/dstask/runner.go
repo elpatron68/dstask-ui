@@ -9,8 +9,8 @@ import (
     "strings"
     "time"
 
-    "github.com/mbusc/dstask-ui/internal/config"
-    applog "github.com/mbusc/dstask-ui/internal/log"
+    "github.com/elpatron68/dstask-ui/internal/config"
+    applog "github.com/elpatron68/dstask-ui/internal/log"
 )
 
 type Runner struct {

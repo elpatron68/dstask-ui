@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/mbusc/dstask-ui/internal/auth"
-	"github.com/mbusc/dstask-ui/internal/config"
-	applog "github.com/mbusc/dstask-ui/internal/log"
-	"github.com/mbusc/dstask-ui/internal/server"
+	"github.com/elpatron68/dstask-ui/internal/auth"
+	"github.com/elpatron68/dstask-ui/internal/config"
+	applog "github.com/elpatron68/dstask-ui/internal/log"
+	"github.com/elpatron68/dstask-ui/internal/server"
 )
 
 func main() {

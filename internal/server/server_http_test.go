@@ -6,8 +6,8 @@ import (
     "strings"
     "testing"
 
-    "github.com/mbusc/dstask-ui/internal/auth"
-    "github.com/mbusc/dstask-ui/internal/config"
+    "github.com/elpatron68/dstask-ui/internal/auth"
+    "github.com/elpatron68/dstask-ui/internal/config"
 )
 
 func newTestServer(t *testing.T) *Server {

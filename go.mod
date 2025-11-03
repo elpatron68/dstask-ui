@@ -1,4 +1,4 @@
-module github.com/mbusc/dstask-ui
+module github.com/elpatron68/dstask-ui
 
 go 1.22.0
 

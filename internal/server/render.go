@@ -5,7 +5,7 @@ import (
     "net/http"
     "regexp"
     "strings"
-    "github.com/mbusc/dstask-ui/internal/auth"
+    "github.com/elpatron68/dstask-ui/internal/auth"
     "sort"
 )
 

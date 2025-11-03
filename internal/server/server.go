@@ -7,11 +7,11 @@ import (
     "strings"
     "time"
 
-    "github.com/mbusc/dstask-ui/internal/auth"
-    "github.com/mbusc/dstask-ui/internal/config"
-    "github.com/mbusc/dstask-ui/internal/dstask"
-    applog "github.com/mbusc/dstask-ui/internal/log"
-    "github.com/mbusc/dstask-ui/internal/ui"
+    "github.com/elpatron68/dstask-ui/internal/auth"
+    "github.com/elpatron68/dstask-ui/internal/config"
+    "github.com/elpatron68/dstask-ui/internal/dstask"
+    applog "github.com/elpatron68/dstask-ui/internal/log"
+    "github.com/elpatron68/dstask-ui/internal/ui"
 )
 
 type Server struct {
