@@ -1,40 +1,40 @@
-# Release-Prozess
+# Release Process
 
-Dieser Leitfaden beschreibt den Release-Prozess und die Changelog-Konventionen für dstask-web.
+This document describes the release process and changelog conventions for dstask-web.
 
-## Versionierung
+## Versioning
 - SemVer (MAJOR.MINOR.PATCH)
-- Beispiel: `v0.1.6`
+- Example: `v0.1.6`
 
-## Changelog-Konvention
-- Präfixe in Commit-Messages:
-  - `feat:` neue Features
-  - `fix:` Bugfixes
-  - `docs:` Dokumentation
-  - `test:` Tests
+## Changelog conventions
+- Commit message prefixes:
+  - `feat:` new features
+  - `fix:` bug fixes
+  - `docs:` documentation
+  - `test:` tests
   - `ci:` CI/CD
-  - `refactor:` interne Umstrukturierungen ohne Verhaltensänderung
+  - `refactor:` internal refactors with no behavior change
   - `perf:`, `build:`, `chore:` optional
-- Release Notes werden automatisch aus Commits generiert (GitHub Release Notes).
+- Release notes are generated automatically by GitHub from commits (generate_release_notes).
 
-## Release erstellen
-1. Stelle sicher, dass CI grün ist (Build + Tests + Linter/Staticcheck).
-2. Erzeuge ein Tag und pushe es:
+## How to cut a release
+1. Ensure CI is green (build + tests + staticcheck).
+2. Create and push a tag:
    ```bash
    git tag -a vX.Y.Z -m "vX.Y.Z"
    git push origin vX.Y.Z
    ```
-3. Die CI (Workflow `CI`) erstellt beim Tag automatisch Artefakte und einen Release (mit Release Notes).
-   - Falls das Tag vor dem Workflow-Setup erstellt wurde: Nutze den manuellen Workflow "Create Release (manual)" in GitHub Actions, um den Release nachträglich zu erzeugen.
+3. The CI workflow (`CI`) builds cross-platform artifacts and creates a GitHub Release for version tags (with auto release notes).
+   - If the tag was created before workflows existed: run the manual workflow "Create Release (manual)" in GitHub Actions to generate a release retroactively.
 
-## Coverage-Report (optional)
-- Wenn `CODECOV_TOKEN` als Repository-Secret gesetzt ist, lädt der CI-Job die Coverage zu Codecov hoch.
-- Badge in README aktualisiert sich je nach Codecov-Status (Badge-URL im README anpassen, wenn Codecov aktiv).
+## Coverage (optional)
+- If `CODECOV_TOKEN` is set as a repository secret, the CI job uploads coverage to Codecov.
+- You can switch the README badge to the Codecov badge if desired.
 
-## Artefakte
-- CI baut plattformübergreifende Builds (Linux, macOS, Windows; amd64/arm64) und hängt diese an Releases an.
+## Artifacts
+- CI cross-compiles binaries for Linux, macOS, Windows (amd64/arm64) and uploads them to the GitHub Release.
 
 ## Hotfixes
-- Hotfix-Branch von `master` abzweigen, patchen, CI durchlaufen lassen, neues Patch-Tag pushen.
+- Branch from `master`, apply fixes, ensure CI passes, then tag and push a new PATCH release.
 
 
