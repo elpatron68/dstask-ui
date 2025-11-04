@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/elpatron68/dstask-ui/internal/auth"
@@ -258,16 +259,17 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
          · <form method="post" action="/tasks/{{index . "id"}}/start" style="display:inline"><button type="submit" {{if not .canStart}}disabled{{end}} title="Mark task as active">start</button></form>
          · <form method="post" action="/tasks/{{index . "id"}}/done" style="display:inline"><button type="submit" {{if not .canDone}}disabled{{end}} title="Mark task as completed/resolved">done</button></form>
          · <form method="post" action="/tasks/{{index . "id"}}/stop" style="display:inline"><button type="submit" {{if not .canStop}}disabled{{end}} title="Pause/stop the task">stop</button></form>
-         · <form method="post" action="/tasks/{{index . "id"}}/remove" style="display:inline"><button type="submit" title="Delete the task">remove</button></form>
+         · <form method="post" action="/tasks/{{index . "id"}}/remove" style="display:inline" onsubmit="return confirm('Are you sure you want to delete this task?');"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"/><button type="submit" title="Delete the task">remove</button></form>
          {{if .hasURLs}} · <a href="/tasks/{{index . "id"}}/open" title="View and open URLs from this task">open</a>{{end}}
       </td>
     </tr>
   {{end}}
   </tbody>
 </table>
-<form id="batchForm" method="post" action="/tasks/batch" style="margin-top:8px;">
+<form id="batchForm" method="post" action="/tasks/batch" style="margin-top:8px;" onsubmit="var action = this.action.value; if ((action === 'remove' || action === 'done') && !confirm('Are you sure you want to ' + action + ' the selected tasks?')) { return false; }">
+  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}"/>
   <label>Batch action:
-    <select name="action">
+    <select name="action" id="batchActionSelect">
       <option value="start">start</option>
       <option value="stop">stop</option>
       <option value="done">done</option>
@@ -278,16 +280,86 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
   <label style="margin-left:8px;">Note: <input name="note" placeholder="for action 'note'"/></label>
   <button type="submit" style="margin-left:8px;">Apply</button>
 </form>
+{{if .Pagination}}
+<div style="margin-top:12px;padding:8px;border-top:1px solid #d0d7de;">
+  <span>Showing {{.Pagination.CurrentPage}} of {{.Pagination.TotalPages}} pages ({{.Pagination.TotalRows}} total tasks)</span>
+  {{if .Pagination.HasPrev}}
+    <a href="{{.Pagination.FirstURL}}" style="margin-left:8px;">« First</a>
+    <a href="{{.Pagination.PrevURL}}" style="margin-left:4px;">‹ Prev</a>
+  {{end}}
+  {{if .Pagination.HasNext}}
+    <a href="{{.Pagination.NextURL}}" style="margin-left:8px;">Next ›</a>
+    <a href="{{.Pagination.LastURL}}" style="margin-left:4px;">Last »</a>
+  {{end}}
+</div>
+{{end}}
 `)
 	uname, _ := auth.UsernameFromRequest(r)
 	show, entries, moreURL, canMore, ret := s.footerData(r, uname)
 	q := r.URL.Query()
+	// Pagination
+	page := 1
+	perPage := 50
+	if p := q.Get("page"); p != "" {
+		if pp, err := strconv.Atoi(p); err == nil && pp > 0 {
+			page = pp
+		}
+	}
+	if pp := q.Get("per_page"); pp != "" {
+		if ppp, err := strconv.Atoi(pp); err == nil && ppp > 0 && ppp <= 500 {
+			perPage = ppp
+		}
+	}
+	totalRows := len(rowsAny)
+	totalPages := (totalRows + perPage - 1) / perPage
+	if totalPages == 0 {
+		totalPages = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+	start := (page - 1) * perPage
+	end := start + perPage
+	if end > totalRows {
+		end = totalRows
+	}
+	paginatedRows := rowsAny[start:end]
+
+	// Build pagination links
+	buildPageURL := func(p int) string {
+		qc := r.URL.Query()
+		qc.Set("page", strconv.Itoa(p))
+		return r.URL.Path + "?" + qc.Encode()
+	}
+	pagination := map[string]any{
+		"CurrentPage": page,
+		"TotalPages":  totalPages,
+		"TotalRows":   totalRows,
+		"PerPage":     perPage,
+		"HasPrev":     page > 1,
+		"HasNext":     page < totalPages,
+		"PrevURL":     "",
+		"NextURL":     "",
+		"FirstURL":    "",
+		"LastURL":     "",
+	}
+	if page > 1 {
+		pagination["PrevURL"] = buildPageURL(page - 1)
+		pagination["FirstURL"] = buildPageURL(1)
+	}
+	if page < totalPages {
+		pagination["NextURL"] = buildPageURL(page + 1)
+		pagination["LastURL"] = buildPageURL(totalPages)
+	}
+
 	dueFilterType := q.Get("dueFilterType")
 	dueFilterDate := q.Get("dueFilterDate")
-	_ = t.Execute(w, map[string]any{"Title": title, "Rows": rowsAny, "Q": q.Get("q"), "Active": activeFromPath(r.URL.Path),
+	csrfToken := s.ensureCSRFToken(w, r)
+	_ = t.Execute(w, map[string]any{"Title": title, "Rows": paginatedRows, "Q": q.Get("q"), "Active": activeFromPath(r.URL.Path),
 		"Flash":      s.getFlash(r),
 		"ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret,
-		"DueFilterType": dueFilterType, "DueFilterDate": dueFilterDate,
+		"DueFilterType": dueFilterType, "DueFilterDate": dueFilterDate, "CSRFToken": csrfToken,
+		"Pagination": pagination,
 		"Sort": map[string]string{
 			"ID": mk("id"), "Status": mk("status"), "Summary": mk("summary"), "Project": mk("project"), "Priority": mk("priority"), "Due": mk("due"), "Tags": mk("tags"),
 			"Created": mk("created"), "Resolved": mk("resolved"), "Age": mk("age"),

@@ -1,6 +1,8 @@
 package server
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -175,5 +177,119 @@ func TestSummaryTokens(t *testing.T) {
 	}
 	if !urlFound {
 		t.Errorf("summaryTokens should preserve URL as single token, got: %v", tokens)
+	}
+}
+
+func TestGenerateCSRFToken(t *testing.T) {
+	// Test that tokens are generated and are unique
+	token1, err := generateCSRFToken()
+	if err != nil {
+		t.Fatalf("generateCSRFToken() failed: %v", err)
+	}
+	if token1 == "" {
+		t.Fatalf("generateCSRFToken() returned empty token")
+	}
+	if len(token1) < 10 {
+		t.Fatalf("generateCSRFToken() returned token too short: %d chars", len(token1))
+	}
+
+	// Generate another token - should be different
+	token2, err := generateCSRFToken()
+	if err != nil {
+		t.Fatalf("generateCSRFToken() failed on second call: %v", err)
+	}
+	if token1 == token2 {
+		t.Fatalf("generateCSRFToken() returned same token twice (should be unique)")
+	}
+}
+
+func TestStripANSI(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "plain text",
+			input:    "Hello world",
+			expected: "Hello world",
+		},
+		{
+			name:     "ANSI color codes",
+			input:    "\x1b[31mRed\x1b[0m text",
+			expected: "Red text",
+		},
+		{
+			name:     "ANSI escape sequence",
+			input:    "\u001B[1mBold\u001B[0m text",
+			expected: "Bold text",
+		},
+		{
+			name:     "multiple ANSI codes",
+			input:    "\x1b[32mGreen\x1b[0m and \x1b[33mYellow\x1b[0m",
+			expected: "Green and Yellow",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := stripANSI(tt.input)
+			if result != tt.expected {
+				t.Errorf("stripANSI(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestValidateCSRFToken(t *testing.T) {
+	// Generate a valid token
+	token, err := generateCSRFToken()
+	if err != nil {
+		t.Fatalf("generateCSRFToken() failed: %v", err)
+	}
+
+	// Test with valid token in cookie
+	req := httptest.NewRequest(http.MethodPost, "/tasks/batch", nil)
+	req.AddCookie(&http.Cookie{Name: "csrf_token", Value: token})
+	valid := validateCSRFToken(req, token)
+	if !valid {
+		t.Errorf("validateCSRFToken() with valid token should return true")
+	}
+
+	// Test with mismatched token
+	req2 := httptest.NewRequest(http.MethodPost, "/tasks/batch", nil)
+	req2.AddCookie(&http.Cookie{Name: "csrf_token", Value: token})
+	otherToken, _ := generateCSRFToken()
+	valid2 := validateCSRFToken(req2, otherToken)
+	if valid2 {
+		t.Errorf("validateCSRFToken() with mismatched token should return false")
+	}
+
+	// Test with missing cookie
+	req3 := httptest.NewRequest(http.MethodPost, "/tasks/batch", nil)
+	valid3 := validateCSRFToken(req3, token)
+	if valid3 {
+		t.Errorf("validateCSRFToken() with missing cookie should return false")
+	}
+
+	// Test with empty token in form
+	req4 := httptest.NewRequest(http.MethodPost, "/tasks/batch", nil)
+	req4.AddCookie(&http.Cookie{Name: "csrf_token", Value: token})
+	valid4 := validateCSRFToken(req4, "")
+	if valid4 {
+		t.Errorf("validateCSRFToken() with empty form token should return false")
+	}
+
+	// Test with empty cookie value
+	req5 := httptest.NewRequest(http.MethodPost, "/tasks/batch", nil)
+	req5.AddCookie(&http.Cookie{Name: "csrf_token", Value: ""})
+	valid5 := validateCSRFToken(req5, token)
+	if valid5 {
+		t.Errorf("validateCSRFToken() with empty cookie value should return false")
 	}
 }

@@ -128,6 +128,13 @@ func (s *Server) routes() {
 			http.Error(w, "invalid form", http.StatusBadRequest)
 			return
 		}
+		// CSRF validation
+		csrfToken := r.FormValue("csrf_token")
+		if !validateCSRFToken(r, csrfToken) {
+			s.setFlash(w, "error", "Invalid security token. Please refresh the page and try again.")
+			http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
+			return
+		}
 		ids := r.Form["ids"]
 		action := strings.TrimSpace(r.FormValue("action"))
 		note := strings.TrimSpace(r.FormValue("note"))
@@ -1898,6 +1905,31 @@ git push -u origin master</pre>`
 		}
 		http.Redirect(w, r, referer, http.StatusSeeOther)
 	})
+}
+
+// ensureCSRFToken ensures a CSRF token cookie exists for the request and returns the token.
+// If no token exists, generates a new one and sets it as a cookie.
+func (s *Server) ensureCSRFToken(w http.ResponseWriter, r *http.Request) string {
+	cookie, err := r.Cookie("csrf_token")
+	if err == nil && cookie.Value != "" {
+		return cookie.Value
+	}
+	// Generate new token
+	token, err := generateCSRFToken()
+	if err != nil {
+		applog.Warnf("failed to generate CSRF token: %v", err)
+		// Fallback to a simple token (less secure but better than nothing)
+		token = fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "csrf_token",
+		Value:    token,
+		Path:     "/",
+		MaxAge:   86400 * 7, // 7 days
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	return token
 }
 
 // helpers to prepare footer data

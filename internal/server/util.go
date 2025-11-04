@@ -1,9 +1,12 @@
 package server
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"net/http"
 	"net/url"
 	"regexp"
 	"sort"
@@ -351,10 +354,51 @@ func truncate(s string, max int) string {
 
 // stripANSI removes ANSI escape sequences (e.g., color codes) from a string.
 // This is useful when displaying command output that may contain terminal formatting.
-func stripANSI(s string) string {
-	// ANSI escape sequences start with ESC (0x1b) followed by '[' and end with 'm' or other characters
-	re := regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
-	return re.ReplaceAllString(s, "")
+func stripANSI(text string) string {
+	// Regular expression to match common ANSI escape codes
+	// Match ESC [ followed by numbers, semicolons, and ending with a letter (color codes, cursor movements, etc.)
+	// Also match ESC ] followed by OSC sequences (like window titles)
+	ansi1 := regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+	ansi2 := regexp.MustCompile(`\x1b\]\d+;.*?\x07`)
+	result := ansi1.ReplaceAllString(text, "")
+	result = ansi2.ReplaceAllString(result, "")
+	// Also handle CSI sequences (0x9b) - convert to bytes for handling
+	bytes := []byte(result)
+	var filtered []byte
+	for i := 0; i < len(bytes); i++ {
+		if bytes[i] == 0x9b { // CSI
+			// Skip until we find a letter (a-zA-Z) which ends the CSI sequence
+			i++
+			for i < len(bytes) && ((bytes[i] >= '0' && bytes[i] <= '9') || bytes[i] == ';' || bytes[i] == ':') {
+				i++
+			}
+			if i < len(bytes) && ((bytes[i] >= 'a' && bytes[i] <= 'z') || (bytes[i] >= 'A' && bytes[i] <= 'Z')) {
+				i++ // Skip the ending letter
+			}
+			i-- // Adjust for loop increment
+		} else {
+			filtered = append(filtered, bytes[i])
+		}
+	}
+	return string(filtered)
+}
+
+// generateCSRFToken generates a secure random CSRF token.
+func generateCSRFToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(b), nil
+}
+
+// validateCSRFToken compares the provided token with the token from the request cookie.
+func validateCSRFToken(r *http.Request, providedToken string) bool {
+	cookie, err := r.Cookie("csrf_token")
+	if err != nil {
+		return false
+	}
+	return cookie.Value != "" && cookie.Value == providedToken
 }
 
 // sort helpers
