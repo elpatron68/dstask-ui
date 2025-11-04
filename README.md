@@ -17,6 +17,10 @@ A lightweight web UI to operate *[dstask](https://github.com/naggie/dstask)* fro
 - Enhanced New Task form: select existing project or enter new, pick tags or add new, date picker for due
 - Flash messages for success/error on actions
 - Batch actions with multi-select (start/stop/done/remove/note)
+- **Due filters**: Server-side filtering by due date (before/after/on/overdue) in HTML views
+- **Templates**: List, create, edit, and delete task templates; create tasks from templates
+- **Undo**: Roll back last action via `dstask undo` button in navbar
+- **Open URLs**: Extract and display clickable URLs from task summaries and notes; automatic URL linkification in task lists
 
 ## Prerequisites
 
@@ -160,12 +164,17 @@ git branch --set-upstream-to=<remote>/<branch> master
 - `/` home
 - `/next`, `/open`, `/active`, `/paused`, `/resolved` (plaintext)
   - HTML view: `?html=1` (e.g. `/open?html=1`)
+  - Due filters: `?html=1&dueFilterType={before|after|on|overdue}&dueFilterDate=DATE`
 - `/tags`, `/projects`
 - `/context` (GET shows, POST sets or clears with `none`)
 - `/tasks/new` (form), `POST /tasks` (create)
+  - Template support: `?template={id}` to pre-select a template
 - `POST /tasks/{id}/{action}` with action in `{start,stop,done,remove,log,note}`; for `note`, provide field `note`
+- `GET /tasks/{id}/open` (display URLs extracted from task summary/notes)
 - `/tasks/action` (form UI), `POST /tasks/submit`
 - `POST /tasks/batch` (batch actions for selected IDs)
+- `/templates` (GET list, POST create), `/templates/new` (form), `/templates/{id}/edit` (GET form, POST update), `POST /templates/{id}/delete`
+- `POST /undo` (roll back last action)
 - `/version`, `/sync` (GET info, POST run)
 
 ### Command log footer
@@ -188,7 +197,11 @@ git branch --set-upstream-to=<remote>/<branch> master
 ## Roadmap / Next steps
 
 - Optional OIDC auth (e.g., Azure AD)
-- Batch actions (initial set implemented)
+- Extended batch actions (add/remove tags, set priority/project/due)
+- Task edit form (web variant of `modify` command)
+- Projects/Tags convenience links (click project/tag to filter)
+- Help page (display `usage.md` in app)
+- Security/UX polish (CSRF tokens, confirm dialogs, pagination)
 
 ## License
 
