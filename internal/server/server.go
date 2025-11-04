@@ -84,8 +84,12 @@ table, th, td, table pre {font-size:13px}
   <a href="/tasks/new" class="{{if eq .Active "new"}}active{{end}}">New task</a>
   <a href="/tasks/action" class="{{if eq .Active "action"}}active{{end}}">Actions</a>
   <a href="/version" class="{{if eq .Active "version"}}active{{end}}">Version</a>
+  <a href="/help" class="{{if eq .Active "help"}}active{{end}}">Help</a>
   <form method="post" action="/undo" style="display:inline;margin-left:8px;">
     <button type="submit" style="background:#f59e0b;color:#fff;border:none;padding:6px 10px;border-radius:4px;cursor:pointer;">Undo</button>
+  </form>
+  <form method="post" action="/logout" style="display:inline;margin-left:8px;">
+    <button type="submit" style="background:#dc3545;color:#fff;border:none;padding:6px 10px;border-radius:4px;cursor:pointer;">Sign Out</button>
   </form>
 </nav>
 {{ template "content" . }}
@@ -130,7 +134,6 @@ func (s *Server) routes() {
 		}
 		ids := r.Form["ids"]
 		action := strings.TrimSpace(r.FormValue("action"))
-		note := strings.TrimSpace(r.FormValue("note"))
 		if len(ids) == 0 || action == "" {
 			http.Error(w, "ids/action required", http.StatusBadRequest)
 			return
@@ -147,11 +150,64 @@ func (s *Server) routes() {
 			case "start", "stop", "done", "remove", "log":
 				res = s.runner.Run(username, 10*time.Second, action, id)
 			case "note":
+				note := strings.TrimSpace(r.FormValue("note"))
 				if note == "" {
 					skipped++
 					continue
 				}
 				res = s.runner.Run(username, 10*time.Second, "note", id, note)
+			case "addTag":
+				tag := strings.TrimSpace(r.FormValue("tag"))
+				if tag == "" {
+					skipped++
+					continue
+				}
+				tag = normalizeTag(tag)
+				if !strings.HasPrefix(tag, "+") {
+					tag = "+" + tag
+				}
+				// Use modify: dstask <id> modify +tag
+				res = s.runner.Run(username, 10*time.Second, id, "modify", tag)
+			case "removeTag":
+				tag := strings.TrimSpace(r.FormValue("tag"))
+				if tag == "" {
+					skipped++
+					continue
+				}
+				tag = normalizeTag(tag)
+				if !strings.HasPrefix(tag, "-") {
+					tag = "-" + tag
+				}
+				// Use modify: dstask <id> modify -tag
+				res = s.runner.Run(username, 10*time.Second, id, "modify", tag)
+			case "setPriority":
+				priority := strings.TrimSpace(r.FormValue("priority"))
+				if priority == "" {
+					skipped++
+					continue
+				}
+				// Use modify: dstask <id> modify P0|P1|P2|P3
+				res = s.runner.Run(username, 10*time.Second, id, "modify", priority)
+			case "setProject":
+				project := strings.TrimSpace(r.FormValue("project"))
+				if project == "" {
+					skipped++
+					continue
+				}
+				// Use modify: dstask <id> modify project:name
+				res = s.runner.Run(username, 10*time.Second, id, "modify", "project:"+quoteIfNeeded(project))
+			case "setDue":
+				dueDate := strings.TrimSpace(r.FormValue("dueDate"))
+				due := strings.TrimSpace(r.FormValue("due"))
+				if dueDate != "" {
+					due = dueDate
+				}
+				if due == "" {
+					skipped++
+					continue
+				}
+				// Use modify: dstask <id> modify due:date
+				res = s.runner.Run(username, 10*time.Second, id, "modify", "due:"+quoteIfNeeded(due))
 			default:
 				skipped++
 				continue
@@ -500,14 +556,23 @@ func (s *Server) routes() {
 			return
 		}
 		if r.URL.Query().Get("raw") != "1" {
+			tags := parseTagsFromOutput(res.Stdout)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			t := template.Must(s.layoutTpl.Clone())
 			_, _ = t.New("content").Parse(`<h2>Tags</h2>
-<pre style="white-space:pre-wrap;">{{.Out}}</pre>`)
+{{if .Tags}}
+<ul style="list-style:none;padding:0;">
+{{range .Tags}}
+  <li style="margin:4px 0;"><a href="/open?html=1&q=+{{.}}" style="color:#0366d6;text-decoration:none;">+{{.}}</a></li>
+{{end}}
+</ul>
+{{else}}
+<p>No tags found.</p>
+{{end}}`)
 			uname, _ := auth.UsernameFromRequest(r)
 			show, entries, moreURL, canMore, ret := s.footerData(r, uname)
 			_ = t.Execute(w, map[string]any{
-				"Out":         strings.TrimSpace(res.Stdout),
+				"Tags":        tags,
 				"Active":      activeFromPath(r.URL.Path),
 				"Flash":       s.getFlash(r),
 				"ShowCmdLog":  show,
@@ -535,37 +600,23 @@ func (s *Server) routes() {
 			return
 		}
 		if r.URL.Query().Get("raw") != "1" {
-			// Versuche JSON zu erkennen und als Tabelle zu rendern
-			if arr, ok := decodeTasksJSONFlexible(res.Stdout); ok && len(arr) > 0 {
-				rows := make([]map[string]string, 0, len(arr))
-				for _, m := range arr {
-					name := trimQuotes(str(firstOf(m, "name", "project")))
-					if name == "" {
-						continue
-					}
-					rows = append(rows, map[string]string{
-						"name":          name,
-						"taskCount":     str(firstOf(m, "taskCount")),
-						"resolvedCount": str(firstOf(m, "resolvedCount")),
-						"active":        str(firstOf(m, "active")),
-						"priority":      str(firstOf(m, "priority")),
-					})
-				}
-				if len(rows) > 0 {
-					w.Header().Set("Content-Type", "text/html; charset=utf-8")
-					s.renderProjectsTable(w, r, "Projects", rows)
-					return
-				}
-			}
-			// Fallback: HTML mit Pre
+			projects := parseProjectsFromOutput(res.Stdout)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			t := template.Must(s.layoutTpl.Clone())
 			_, _ = t.New("content").Parse(`<h2>Projects</h2>
-<pre style="white-space:pre-wrap;">{{.Out}}</pre>`)
+{{if .Projects}}
+<ul style="list-style:none;padding:0;">
+{{range .Projects}}
+  <li style="margin:4px 0;"><a href="/open?html=1&q=project:{{.}}" style="color:#0366d6;text-decoration:none;">{{.}}</a></li>
+{{end}}
+</ul>
+{{else}}
+<p>No projects found.</p>
+{{end}}`)
 			uname, _ := auth.UsernameFromRequest(r)
 			show, entries, moreURL, canMore, ret := s.footerData(r, uname)
 			_ = t.Execute(w, map[string]any{
-				"Out":         strings.TrimSpace(res.Stdout),
+				"Projects":    projects,
 				"Active":      activeFromPath(r.URL.Path),
 				"Flash":       s.getFlash(r),
 				"ShowCmdLog":  show,
@@ -1233,9 +1284,254 @@ func (s *Server) routes() {
 
 	// Task Aktionen: /tasks/{id}/start|stop|done|remove|log|note
 	// Open URLs: /tasks/{id}/open
+	// Edit Task: /tasks/{id}/edit
 	s.mux.HandleFunc("/tasks/", func(w http.ResponseWriter, r *http.Request) {
-		// Prüfe zuerst auf GET /tasks/{id}/open für URL-Anzeige
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+
+		// GET /tasks/{id}/edit - Bearbeitungsformular anzeigen
+		if len(parts) == 3 && parts[0] == "tasks" && parts[2] == "edit" && r.Method == http.MethodGet {
+			id := parts[1]
+			if id == "" {
+				http.NotFound(w, r)
+				return
+			}
+			username, _ := auth.UsernameFromRequest(r)
+			res := s.runner.Run(username, 5*time.Second, "export")
+
+			if res.Err != nil || res.ExitCode != 0 {
+				http.Error(w, "Failed to fetch tasks", http.StatusBadGateway)
+				return
+			}
+
+			tasks, ok := decodeTasksJSONFlexible(res.Stdout)
+			if !ok {
+				http.Error(w, "Failed to parse tasks", http.StatusInternalServerError)
+				return
+			}
+
+			var task map[string]any
+			for _, t := range tasks {
+				if str(firstOf(t, "id", "ID")) == id {
+					task = t
+					break
+				}
+			}
+
+			if task == nil {
+				http.Error(w, "Task not found", http.StatusNotFound)
+				return
+			}
+
+			// Fetch existing projects and tags
+			projRes := s.runner.Run(username, 5_000_000_000, "show-projects")
+			tagRes := s.runner.Run(username, 5_000_000_000, "show-tags")
+			projects := parseProjectsFromOutput(projRes.Stdout)
+			tags := parseTagsFromOutput(tagRes.Stdout)
+
+			// Parse existing tags from task
+			existingTags := make(map[string]bool)
+			if tagList := firstOf(task, "tags", "Tags"); tagList != nil {
+				if tagStr := joinTags(tagList); tagStr != "" {
+					for _, tag := range strings.Split(tagStr, ", ") {
+						tag = strings.TrimSpace(tag)
+						if tag != "" {
+							existingTags[tag] = true
+						}
+					}
+				}
+			}
+
+			currentSummary := trimQuotes(str(firstOf(task, "summary", "description")))
+			currentProject := trimQuotes(str(firstOf(task, "project")))
+			currentPriority := str(firstOf(task, "priority"))
+			currentDue := trimQuotes(str(firstOf(task, "due", "dueDate")))
+
+			// Parse due date to YYYY-MM-DD format if it's a date
+			dueDateValue := ""
+			dueValue := currentDue
+			if currentDue != "" {
+				if t := parseTimeOrZero(currentDue); !t.IsZero() {
+					dueDateValue = t.Format("2006-01-02")
+					dueValue = "" // Clear due field if we can parse it as date
+				}
+			}
+
+			hasProjectInSelect := false
+			for _, p := range projects {
+				if p == currentProject {
+					hasProjectInSelect = true
+					break
+				}
+			}
+
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			t := template.Must(s.layoutTpl.Clone())
+			_, _ = t.New("content").Parse(`
+<h2>Edit task #{{.TaskID}}</h2>
+<form method="post" action="/tasks/{{.TaskID}}/edit">
+  <div><label>Summary: <input name="summary" value="{{.Summary}}" required style="width:60%"></label></div>
+  <div>
+    <label>Project:</label>
+    <select name="projectSelect">
+      <option value="">(none)</option>
+      {{range .Projects}}
+        <option value="{{.}}" {{if eq $.Project .}}selected{{end}}>{{.}}</option>
+      {{end}}
+    </select>
+    <span style="margin:0 8px;">or</span>
+    <input name="project" value="{{if not .HasProjectInSelect}}{{.Project}}{{end}}" placeholder="new project" />
+  </div>
+  <div>
+    <label>Priority:</label>
+    <select name="priority">
+      <option value="">(none)</option>
+      <option value="P0" {{if eq $.Priority "P0"}}selected{{end}}>P0 (Critical)</option>
+      <option value="P1" {{if eq $.Priority "P1"}}selected{{end}}>P1 (High)</option>
+      <option value="P2" {{if eq $.Priority "P2"}}selected{{end}}>P2 (Normal)</option>
+      <option value="P3" {{if eq $.Priority "P3"}}selected{{end}}>P3 (Low)</option>
+    </select>
+  </div>
+  <div>
+    <label>Tags:</label>
+    <div style="max-height:140px;overflow:auto;border:1px solid #ddd;padding:6px;">
+      {{range .Tags}}
+        <label style="display:inline-block;margin-right:8px;">
+          <input type="checkbox" name="tagsExisting" value="{{.}}" {{if index $.ExistingTags .}}checked{{end}}/> {{.}}
+        </label>
+      {{end}}
+    </div>
+    <div style="margin-top:6px;">
+      <label>Add tags (comma-separated): <input name="tags" placeholder="additional tags"></label>
+    </div>
+  </div>
+  <div>
+    <label>Due:</label>
+    <input type="date" name="dueDate" value="{{.DueDate}}" />
+    <span style="margin:0 8px;">or</span>
+    <input name="due" value="{{.Due}}" placeholder="e.g. friday / 2025-12-31" />
+  </div>
+  <div style="margin-top:8px;">
+    <button type="submit">Update task</button>
+    <form method="get" action="/open" style="display:inline;margin-left:8px;">
+      <input type="hidden" name="html" value="1" />
+      <button type="submit">cancel</button>
+    </form>
+  </div>
+</form>
+`)
+
+			uname, _ := auth.UsernameFromRequest(r)
+			show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+			_ = t.Execute(w, map[string]any{
+				"TaskID":             id,
+				"Summary":            currentSummary,
+				"Project":            currentProject,
+				"HasProjectInSelect": hasProjectInSelect,
+				"Priority":           currentPriority,
+				"DueDate":            dueDateValue,
+				"Due":                dueValue,
+				"Projects":           projects,
+				"Tags":               tags,
+				"ExistingTags":       existingTags,
+				"Active":             activeFromPath(r.URL.Path),
+				"ShowCmdLog":         show,
+				"CmdEntries":         entries,
+				"MoreURL":            moreURL,
+				"CanShowMore":        canMore,
+				"ReturnURL":          ret,
+			})
+			return
+		}
+
+		// POST /tasks/{id}/edit - Task aktualisieren
+		if len(parts) == 3 && parts[0] == "tasks" && parts[2] == "edit" && r.Method == http.MethodPost {
+			id := parts[1]
+			if id == "" {
+				http.NotFound(w, r)
+				return
+			}
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "invalid form", http.StatusBadRequest)
+				return
+			}
+			username, _ := auth.UsernameFromRequest(r)
+
+			summary := strings.TrimSpace(r.FormValue("summary"))
+			if summary == "" {
+				http.Error(w, "summary required", http.StatusBadRequest)
+				return
+			}
+
+			project := strings.TrimSpace(r.FormValue("project"))
+			if ps := strings.TrimSpace(r.FormValue("projectSelect")); ps != "" {
+				project = ps
+			}
+			priority := strings.TrimSpace(r.FormValue("priority"))
+			dueDate := strings.TrimSpace(r.FormValue("dueDate"))
+			due := strings.TrimSpace(r.FormValue("due"))
+			if dueDate != "" {
+				due = dueDate
+			}
+
+			// Build modify args: dstask <id> modify <summary> project: priority due: +tags
+			args := []string{id, "modify"}
+			// Summary tokens
+			args = append(args, summaryTokens(summary)...)
+			// Project
+			if project != "" {
+				args = append(args, "project:"+quoteIfNeeded(project))
+			}
+			// Priority
+			if priority != "" {
+				args = append(args, priority)
+			}
+			// Due
+			if due != "" {
+				args = append(args, "due:"+quoteIfNeeded(due))
+			}
+			// Tags from checkboxes
+			for _, t := range r.Form["tagsExisting"] {
+				t = strings.TrimSpace(t)
+				if t == "" {
+					continue
+				}
+				t = normalizeTag(t)
+				if !strings.HasPrefix(t, "+") {
+					args = append(args, "+"+t)
+				} else {
+					args = append(args, t)
+				}
+			}
+			// Additional tags
+			if tags := strings.TrimSpace(r.FormValue("tags")); tags != "" {
+				for _, t := range strings.Split(tags, ",") {
+					t = strings.TrimSpace(t)
+					if t == "" {
+						continue
+					}
+					t = normalizeTag(t)
+					if !strings.HasPrefix(t, "+") {
+						args = append(args, "+"+t)
+					} else {
+						args = append(args, t)
+					}
+				}
+			}
+
+			res := s.runner.Run(username, 10*time.Second, args...)
+			s.cmdStore.Append(username, "Edit task", args)
+			if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
+				applog.Warnf("task edit failed: code=%d timeout=%v err=%v", res.ExitCode, res.TimedOut, res.Err)
+				s.setFlash(w, "error", "Task update failed: "+res.Stderr)
+				http.Redirect(w, r, "/tasks/"+id+"/edit", http.StatusSeeOther)
+				return
+			}
+			s.setFlash(w, "success", "Task updated successfully")
+			http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
+			return
+		}
+
+		// Prüfe zuerst auf GET /tasks/{id}/open für URL-Anzeige
 		if len(parts) == 3 && parts[0] == "tasks" && parts[2] == "open" && r.Method == http.MethodGet {
 			id := parts[1]
 			if id == "" {
@@ -1585,6 +1881,136 @@ git push -u origin master</pre>`
 		}
 	})
 
+	// Help page - Web UI specific help
+	s.mux.HandleFunc("/help", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		t := template.Must(s.layoutTpl.Clone())
+		_, _ = t.New("content").Parse(`<h2>Help - dstask Web UI</h2>
+<div style="max-width:800px;line-height:1.6;">
+<h3>Overview</h3>
+<p>The dstask Web UI provides a user-friendly interface for managing tasks based on the <a href="https://github.com/naggie/dstask" target="_blank">dstask CLI</a>.</p>
+
+<h3>Navigation</h3>
+<ul>
+  <li><strong>Home</strong>: Main page of the web application</li>
+  <li><strong>Next</strong>: Shows the most important tasks (sorted by priority and creation date)</li>
+  <li><strong>Open</strong>: Shows all non-resolved tasks</li>
+  <li><strong>Active</strong>: Shows currently active tasks</li>
+  <li><strong>Paused</strong>: Shows paused tasks</li>
+  <li><strong>Resolved</strong>: Shows resolved/completed tasks</li>
+  <li><strong>Tags</strong>: List of all tags with direct filter links</li>
+  <li><strong>Projects</strong>: List of all projects with direct filter links</li>
+  <li><strong>Templates</strong>: Manage task templates</li>
+  <li><strong>New task</strong>: Create a new task</li>
+</ul>
+
+<h3>Creating Tasks</h3>
+<p>On the <strong>New task</strong> page, you can create new tasks:</p>
+<ul>
+  <li><strong>Summary</strong>: Task description (required)</li>
+  <li><strong>Project</strong>: Assign a project (select from list or enter new)</li>
+  <li><strong>Tags</strong>: Add tags (select from existing tags or enter new, comma-separated)</li>
+  <li><strong>Due</strong>: Due date (as date or relative expression like "friday", "tomorrow")</li>
+  <li><strong>Template</strong>: Use an optional template</li>
+</ul>
+
+<h3>Editing Tasks</h3>
+<p>Click the <strong>edit</strong> button in the task list to edit a task. You can modify:</p>
+<ul>
+  <li>Summary (description)</li>
+  <li>Project</li>
+  <li>Priority (P0=Critical, P1=High, P2=Normal, P3=Low)</li>
+  <li>Tags (add or remove tags)</li>
+  <li>Due (due date)</li>
+</ul>
+
+<h3>Task Actions</h3>
+<p>Each task can be modified via buttons in the task list:</p>
+<ul>
+  <li><strong>edit</strong>: Edit the task</li>
+  <li><strong>start</strong>: Mark task as active</li>
+  <li><strong>stop</strong>: Pause the task</li>
+  <li><strong>done</strong>: Mark task as completed</li>
+  <li><strong>remove</strong>: Delete the task</li>
+  <li><strong>open</strong>: Open URLs in the task (if present)</li>
+</ul>
+
+<h3>Batch Actions</h3>
+<p>Select multiple tasks using checkboxes and perform batch actions:</p>
+<ul>
+  <li><strong>start/stop/done/remove</strong>: Change status or delete</li>
+  <li><strong>note</strong>: Add a note to all selected tasks</li>
+  <li><strong>add tag</strong>: Add a tag to all selected tasks</li>
+  <li><strong>remove tag</strong>: Remove a tag from all selected tasks</li>
+  <li><strong>set priority</strong>: Set priority for all selected tasks</li>
+  <li><strong>set project</strong>: Set project for all selected tasks</li>
+  <li><strong>set due</strong>: Set due date for all selected tasks</li>
+</ul>
+
+<h3>Filtering</h3>
+<p>On list pages, you can filter tasks:</p>
+<ul>
+  <li><strong>Text filter</strong>: Search for text in the description</li>
+  <li><strong>Tag filter</strong>: <code>+tag</code> for tasks with tag, <code>-tag</code> for tasks without tag</li>
+  <li><strong>Project filter</strong>: <code>project:name</code> for tasks in a specific project</li>
+  <li><strong>Due filter</strong>:
+    <ul>
+      <li><code>due:overdue</code> - overdue tasks</li>
+      <li><code>due.before:DATE</code> - tasks due before a date</li>
+      <li><code>due.after:DATE</code> - tasks due after a date</li>
+      <li><code>due.on:DATE</code> - tasks due on a specific date</li>
+    </ul>
+    <p>Date can be specified as absolute date (YYYY-MM-DD) or relative (e.g., "friday", "tomorrow").</p>
+  </li>
+</ul>
+<p>Multiple filters can be combined, e.g.: <code>+work project:dstask due:overdue</code></p>
+
+<h3>Templates</h3>
+<p>Templates are reusable task blueprints:</p>
+<ul>
+  <li><strong>Create</strong>: Create a new template on the Templates page</li>
+  <li><strong>Use</strong>: Select a template when creating a new task</li>
+  <li><strong>Edit</strong>: Modify existing templates</li>
+  <li><strong>Delete</strong>: Remove templates that are no longer needed</li>
+</ul>
+
+<h3>URLs in Tasks</h3>
+<p>URLs in task descriptions are automatically linked. Click <strong>open</strong> next to a task to view and open all URLs in that task.</p>
+
+<h3>Priorities</h3>
+<table border="1" cellpadding="6" style="border-collapse:collapse;margin:8px 0;">
+  <tr><th>Symbol</th><th>Name</th><th>Description</th></tr>
+  <tr><td><strong>P0</strong></td><td>Critical</td><td>Must be resolved immediately</td></tr>
+  <tr><td><strong>P1</strong></td><td>High</td><td>Should be resolved in the near future</td></tr>
+  <tr><td><strong>P2</strong></td><td>Normal</td><td>Default priority</td></tr>
+  <tr><td><strong>P3</strong></td><td>Low</td><td>Low priority</td></tr>
+</table>
+
+<h3>Undo</h3>
+<p>The <strong>Undo</strong> button in the navigation reverts the last action (git revert).</p>
+
+<h3>Sorting</h3>
+<p>Click on column headers in tables to sort by that column. Click again to reverse the sort direction.</p>
+
+<h3>Notes</h3>
+<ul>
+  <li>The web app uses the dstask CLI in the background. All actions are executed as dstask commands.</li>
+  <li>The "Recent dstask commands" in the footer show the last executed commands.</li>
+  <li>For advanced features and configuration, see the <a href="https://github.com/naggie/dstask" target="_blank">dstask documentation</a>.</li>
+</ul>
+</div>`)
+		uname, _ := auth.UsernameFromRequest(r)
+		show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+		_ = t.Execute(w, map[string]any{
+			"Active":      activeFromPath(r.URL.Path),
+			"ShowCmdLog":  show,
+			"CmdEntries":  entries,
+			"MoreURL":     moreURL,
+			"CanShowMore": canMore,
+			"ReturnURL":   ret,
+		})
+	})
+
 	// Undo last action
 	s.mux.HandleFunc("/undo", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -1606,6 +2032,37 @@ git push -u origin master</pre>`
 			referer = "/open?html=1"
 		}
 		http.Redirect(w, r, referer, http.StatusSeeOther)
+	})
+
+	// Logout - show logout confirmation page
+	s.mux.HandleFunc("/logout", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// Show logout confirmation page
+		// Note: HTTP Basic Auth credentials are cached by the browser, so complete logout
+		// may require the user to close the browser or clear site data manually
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Clear-Site-Data", "\"cache\", \"cookies\", \"storage\"")
+		html := `<!doctype html>
+<html><head><meta charset="utf-8"><title>Signed out - dstask</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;margin:16px;text-align:center;padding-top:50px}
+h1{color:#24292e}
+p{color:#586069;max-width:600px;margin:20px auto;line-height:1.6}
+a{color:#0366d6;text-decoration:none;display:inline-block;margin-top:16px;padding:8px 16px;background:#0366d6;color:#fff;border-radius:4px}
+a:hover{background:#0256cc;text-decoration:none}
+.note{font-size:0.9em;color:#6a737d;margin-top:24px}
+</style>
+</head><body>
+<h1>Signed Out</h1>
+<p>You have been signed out successfully.</p>
+<p class="note">Note: Since HTTP Basic Auth credentials are cached by your browser, you may need to close the browser window or clear site data to fully sign out. The next time you visit this site, your browser may automatically use saved credentials.</p>
+<a href="/">Sign in again</a>
+</body></html>`
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(html))
 	})
 }
 

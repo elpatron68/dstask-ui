@@ -239,6 +239,8 @@ func activeFromPath(path string) string {
 		return "sync"
 	case strings.HasPrefix(path, "/undo"):
 		return "undo"
+	case strings.HasPrefix(path, "/help"):
+		return "help"
 	default:
 		return "home"
 	}

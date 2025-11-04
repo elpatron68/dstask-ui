@@ -254,7 +254,8 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
       <td><code>{{index . "resolved"}}</code></td>
       <td>{{index . "age"}}</td>
       <td>
-        <form method="post" action="/tasks/{{index . "id"}}/start" style="display:inline"><button type="submit" {{if not .canStart}}disabled{{end}}>start</button></form>
+        <form method="get" action="/tasks/{{index . "id"}}/edit" style="display:inline"><button type="submit">edit</button></form>
+         · <form method="post" action="/tasks/{{index . "id"}}/start" style="display:inline"><button type="submit" {{if not .canStart}}disabled{{end}}>start</button></form>
          · <form method="post" action="/tasks/{{index . "id"}}/done" style="display:inline"><button type="submit" {{if not .canDone}}disabled{{end}}>done</button></form>
          · <form method="post" action="/tasks/{{index . "id"}}/stop" style="display:inline"><button type="submit" {{if not .canStop}}disabled{{end}}>stop</button></form>
          · <form method="post" action="/tasks/{{index . "id"}}/remove" style="display:inline"><button type="submit">remove</button></form>
@@ -266,17 +267,53 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
 </table>
 <form id="batchForm" method="post" action="/tasks/batch" style="margin-top:8px;">
   <label>Batch action:
-    <select name="action">
+    <select name="action" id="batchAction" onchange="updateBatchForm()">
       <option value="start">start</option>
       <option value="stop">stop</option>
       <option value="done">done</option>
       <option value="remove">remove</option>
       <option value="note">note</option>
+      <option value="addTag">add tag</option>
+      <option value="removeTag">remove tag</option>
+      <option value="setPriority">set priority</option>
+      <option value="setProject">set project</option>
+      <option value="setDue">set due</option>
     </select>
   </label>
-  <label style="margin-left:8px;">Note: <input name="note" placeholder="for action 'note'"/></label>
+  <span id="batchNoteInput" style="margin-left:8px;display:none;">
+    <label>Note: <input name="note" placeholder="for action 'note'"/></label>
+  </span>
+  <span id="batchTagInput" style="margin-left:8px;display:none;">
+    <label>Tag: <input name="tag" placeholder="tag name"/></label>
+  </span>
+  <span id="batchPriorityInput" style="margin-left:8px;display:none;">
+    <label>Priority:
+      <select name="priority">
+        <option value="P0">P0 (Critical)</option>
+        <option value="P1">P1 (High)</option>
+        <option value="P2">P2 (Normal)</option>
+        <option value="P3">P3 (Low)</option>
+      </select>
+    </label>
+  </span>
+  <span id="batchProjectInput" style="margin-left:8px;display:none;">
+    <label>Project: <input name="project" placeholder="project name"/></label>
+  </span>
+  <span id="batchDueInput" style="margin-left:8px;display:none;">
+    <label>Due: <input type="date" name="dueDate"/> or <input name="due" placeholder="e.g. friday / 2025-12-31"/></label>
+  </span>
   <button type="submit" style="margin-left:8px;">Apply</button>
 </form>
+<script>
+function updateBatchForm() {
+  const action = document.getElementById('batchAction').value;
+  document.getElementById('batchNoteInput').style.display = action === 'note' ? 'inline' : 'none';
+  document.getElementById('batchTagInput').style.display = (action === 'addTag' || action === 'removeTag') ? 'inline' : 'none';
+  document.getElementById('batchPriorityInput').style.display = action === 'setPriority' ? 'inline' : 'none';
+  document.getElementById('batchProjectInput').style.display = action === 'setProject' ? 'inline' : 'none';
+  document.getElementById('batchDueInput').style.display = action === 'setDue' ? 'inline' : 'none';
+}
+</script>
 `)
 	uname, _ := auth.UsernameFromRequest(r)
 	show, entries, moreURL, canMore, ret := s.footerData(r, uname)
