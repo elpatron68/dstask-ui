@@ -1,6 +1,76 @@
 # dstask-web (Go Web UI for dstask)
 
 A lightweight web UI to operate *[dstask](https://github.com/naggie/dstask)* from the browser. Implemented in Go, with Basic Auth, per-user repo mapping, and Windows support.
+## Onboarding / Erste Schritte
+
+Dieser Abschnitt führt dich durch Installation, Konfiguration und den Erst-Start inklusive Repository-Setup und Sync.
+
+### Voraussetzungen
+- `Go >= 1.22`
+- `dstask` installiert (Linux/macOS über Paketmanager, Windows z. B. `C:\tools\dstask.exe`)
+- `git` installiert (für das `.dstask` Git-Repository)
+
+### Build
+- Siehe Abschnitt „Build“ weiter unten. Kurzfassung (Linux/macOS):
+
+```bash
+# im Repository-Root
+go mod tidy
+mkdir -p bin
+go build -o bin/dstask-web ./cmd/dstask-web
+```
+
+### Konfiguration (config.yaml)
+- Beispiel siehe vorhandene `config.yaml`. Für Linux empfiehlt sich:
+
+```yaml
+dstaskBin: ""             # leer lassen, wenn dstask über PATH gefunden wird
+listen: ":8080"
+repos:
+  admin: "~/.dstask"      # Nutzer -> HOME/.dstask
+logging:
+  level: "info"
+```
+
+- Alternativ kann `DSTWEB_DSTASK_BIN` zur Laufzeit gesetzt werden, um das `dstask`-Binary zu überschreiben.
+- `repos.<user>` kann auf ein HOME zeigen (dann wird HOME/.dstask verwendet) oder direkt auf das `.dstask`-Verzeichnis.
+- `~` und Umgebungsvariablen werden aufgelöst.
+
+### Starten
+```bash
+export DSTWEB_USER=admin
+export DSTWEB_PASS=admin
+./bin/dstask-web
+# Browser: http://localhost:8080/
+```
+
+### Verhalten beim ersten Start (Setup-Flow)
+- **dstask-Binary-Prüfung**: Das Binary wird aus `config.yaml` oder aus dem `PATH` ermittelt. Ist es nicht auffindbar, startet der Server nicht und meldet den Fehler.
+- **`.dstask`-Repo-Prüfung**: Pro Nutzer (gemäß `repos`) wird geprüft, ob das `.dstask`-Verzeichnis existiert.
+  - Falls nicht vorhanden: Die App versucht, das `dstask`-Repository nicht-interaktiv zu initialisieren (Antwort „y“ auf die bekannte Rückfrage). Dies betrifft nur die lokale Struktur; Git-Remote wird dabei noch nicht gesetzt.
+  - Auf der Startseite wird angezeigt, ob ein Git-Repository im `.dstask` existiert und ob ein Remote konfiguriert ist.
+- **Kein Git-Repository vorhanden** (`~/.dstask/.git` fehlt): Die Startseite bietet ein Formular an, um eine Remote-URL zu klonen (`POST /sync/clone-remote`). Das Ziel ist `~/.dstask`.
+- **Git-Repository vorhanden, aber kein Remote**: Die Startseite (und `POST /sync`) bieten ein Formular an, um `remote origin` zu setzen (`POST /sync/set-remote`).
+- **Upstream/Tracking automatisch setzen**: Vor `sync` versucht die App, den Upstream zu setzen. Zuerst auf den aktuellen lokalen Branch (z. B. `master`), bei Bedarf wird der Remote-HEAD-Branch (z. B. `main`) ermittelt und verwendet. Falls das fehlschlägt, bleibt die Fehlermeldung sichtbar.
+
+### Sync
+- Button „Sync“ auf der Startseite oder Aufruf von `POST /sync` führt `dstask sync` aus.
+- Häufige Git-Hinweise (z. B. fehlender Upstream) werden mit erklärender Meldung angezeigt.
+
+### Endpunkte für Setup/Sync
+- `POST /sync/clone-remote` – Klont ein Remote-Repository nach `~/.dstask` (leer oder neu).
+- `POST /sync/set-remote` – Setzt `remote origin` für ein bestehendes Git-Repository in `~/.dstask`.
+- `POST /sync` – Führt `dstask sync` aus (setzt best-effort Upstream, falls nötig).
+
+### Troubleshooting
+- „address already in use“ auf `:8080`: Anderen Prozess beenden oder `DSTWEB_LISTEN` setzen (z. B. `127.0.0.1:3000`).
+- `dstask` nicht gefunden: `DSTWEB_DSTASK_BIN` setzen oder `dstask` installieren.
+- Kein Upstream: Manuell setzen, z. B. (Branch ggf. anpassen):
+
+```bash
+git -C "$HOME/.dstask" branch --set-upstream-to=origin/main main
+```
+
 
 ## Features (MVP)
 
