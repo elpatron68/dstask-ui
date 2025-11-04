@@ -25,6 +25,13 @@ type Server struct {
 	uiCfg     config.UIConfig
 }
 
+const faviconSVG = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect rx="12" width="64" height="64" fill="#0366d6"/>
+  <path d="M26 44L14 32l4-4 8 8 20-20 4 4-24 24z" fill="#fff"/>
+  <!-- simple checkmark in a rounded square -->
+ </svg>`
+
 func NewServer(userStore auth.UserStore) *Server {
 	return NewServerWithConfig(userStore, config.Default())
 }
@@ -41,7 +48,7 @@ func NewServerWithConfig(userStore auth.UserStore, cfg *config.Config) *Server {
 		"linkifyURLs":    linkifyURLs,
 		"renderMarkdown": renderMarkdown,
 	})
-	s.layoutTpl = template.Must(baseTpl.Parse(`<!doctype html><html><head><meta charset="utf-8"><title>dstask</title>
+    s.layoutTpl = template.Must(baseTpl.Parse(`<!doctype html><html><head><meta charset="utf-8"><title>dstask</title><link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;margin:16px}
 nav a{padding:6px 10px; text-decoration:none; color:#0366d6; border-radius:4px}
@@ -137,6 +144,14 @@ table, th, td, table pre {font-size:13px}
 }
 
 func (s *Server) routes() {
+    // Favicon
+    s.mux.HandleFunc("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+        _, _ = w.Write([]byte(faviconSVG))
+    })
+    s.mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+        http.Redirect(w, r, "/favicon.svg", http.StatusMovedPermanently)
+    })
 	// Batch actions
 	s.mux.HandleFunc("/tasks/batch", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
