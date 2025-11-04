@@ -84,12 +84,8 @@ table, th, td, table pre {font-size:13px}
   <a href="/tasks/new" class="{{if eq .Active "new"}}active{{end}}">New task</a>
   <a href="/tasks/action" class="{{if eq .Active "action"}}active{{end}}">Actions</a>
   <a href="/version" class="{{if eq .Active "version"}}active{{end}}">Version</a>
-  <a href="/help" class="{{if eq .Active "help"}}active{{end}}">Help</a>
   <form method="post" action="/undo" style="display:inline;margin-left:8px;">
-    <button type="submit" style="background:#f59e0b;color:#fff;border:none;padding:6px 10px;border-radius:4px;cursor:pointer;" title="Revert the last action (git revert)">Undo</button>
-  </form>
-  <form method="post" action="/logout" style="display:inline;margin-left:8px;">
-    <button type="submit" style="background:#dc3545;color:#fff;border:none;padding:6px 10px;border-radius:4px;cursor:pointer;" title="Sign out of the application">Sign Out</button>
+    <button type="submit" style="background:#f59e0b;color:#fff;border:none;padding:6px 10px;border-radius:4px;cursor:pointer;">Undo</button>
   </form>
 </nav>
 {{ template "content" . }}
@@ -134,6 +130,7 @@ func (s *Server) routes() {
 		}
 		ids := r.Form["ids"]
 		action := strings.TrimSpace(r.FormValue("action"))
+		note := strings.TrimSpace(r.FormValue("note"))
 		if len(ids) == 0 || action == "" {
 			http.Error(w, "ids/action required", http.StatusBadRequest)
 			return
@@ -150,64 +147,11 @@ func (s *Server) routes() {
 			case "start", "stop", "done", "remove", "log":
 				res = s.runner.Run(username, 10*time.Second, action, id)
 			case "note":
-				note := strings.TrimSpace(r.FormValue("note"))
 				if note == "" {
 					skipped++
 					continue
 				}
 				res = s.runner.Run(username, 10*time.Second, "note", id, note)
-			case "addTag":
-				tag := strings.TrimSpace(r.FormValue("tag"))
-				if tag == "" {
-					skipped++
-					continue
-				}
-				tag = normalizeTag(tag)
-				if !strings.HasPrefix(tag, "+") {
-					tag = "+" + tag
-				}
-				// Use modify: dstask <id> modify +tag
-				res = s.runner.Run(username, 10*time.Second, id, "modify", tag)
-			case "removeTag":
-				tag := strings.TrimSpace(r.FormValue("tag"))
-				if tag == "" {
-					skipped++
-					continue
-				}
-				tag = normalizeTag(tag)
-				if !strings.HasPrefix(tag, "-") {
-					tag = "-" + tag
-				}
-				// Use modify: dstask <id> modify -tag
-				res = s.runner.Run(username, 10*time.Second, id, "modify", tag)
-			case "setPriority":
-				priority := strings.TrimSpace(r.FormValue("priority"))
-				if priority == "" {
-					skipped++
-					continue
-				}
-				// Use modify: dstask <id> modify P0|P1|P2|P3
-				res = s.runner.Run(username, 10*time.Second, id, "modify", priority)
-			case "setProject":
-				project := strings.TrimSpace(r.FormValue("project"))
-				if project == "" {
-					skipped++
-					continue
-				}
-				// Use modify: dstask <id> modify project:name
-				res = s.runner.Run(username, 10*time.Second, id, "modify", "project:"+quoteIfNeeded(project))
-			case "setDue":
-				dueDate := strings.TrimSpace(r.FormValue("dueDate"))
-				due := strings.TrimSpace(r.FormValue("due"))
-				if dueDate != "" {
-					due = dueDate
-				}
-				if due == "" {
-					skipped++
-					continue
-				}
-				// Use modify: dstask <id> modify due:date
-				res = s.runner.Run(username, 10*time.Second, id, "modify", "due:"+quoteIfNeeded(due))
 			default:
 				skipped++
 				continue
@@ -245,7 +189,7 @@ func (s *Server) routes() {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		t := template.Must(s.layoutTpl.Clone())
 		_, _ = t.New("content").Parse(`<h1>dstask Web UI</h1><p>Signed in as: {{.User}}</p>
-<form method="post" action="/sync" style="margin-top:8px"><button type="submit" title="Sync tasks with git repository (pull then push)">Sync</button></form>`) // placeholder
+<form method="post" action="/sync" style="margin-top:8px"><button type="submit">Sync</button></form>`) // placeholder
 		username, _ := auth.UsernameFromRequest(r)
 		show, entries, moreURL, canMore, ret := s.footerData(r, username)
 		_ = t.Execute(w, map[string]any{
@@ -556,23 +500,14 @@ func (s *Server) routes() {
 			return
 		}
 		if r.URL.Query().Get("raw") != "1" {
-			tags := parseTagsFromOutput(res.Stdout)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			t := template.Must(s.layoutTpl.Clone())
 			_, _ = t.New("content").Parse(`<h2>Tags</h2>
-{{if .Tags}}
-<ul style="list-style:none;padding:0;">
-{{range .Tags}}
-  <li style="margin:4px 0;"><a href="/open?html=1&q=+{{.}}" style="color:#0366d6;text-decoration:none;">+{{.}}</a></li>
-{{end}}
-</ul>
-{{else}}
-<p>No tags found.</p>
-{{end}}`)
+<pre style="white-space:pre-wrap;">{{.Out}}</pre>`)
 			uname, _ := auth.UsernameFromRequest(r)
 			show, entries, moreURL, canMore, ret := s.footerData(r, uname)
 			_ = t.Execute(w, map[string]any{
-				"Tags":        tags,
+				"Out":         strings.TrimSpace(res.Stdout),
 				"Active":      activeFromPath(r.URL.Path),
 				"Flash":       s.getFlash(r),
 				"ShowCmdLog":  show,
@@ -600,23 +535,37 @@ func (s *Server) routes() {
 			return
 		}
 		if r.URL.Query().Get("raw") != "1" {
-			projects := parseProjectsFromOutput(res.Stdout)
+			// Versuche JSON zu erkennen und als Tabelle zu rendern
+			if arr, ok := decodeTasksJSONFlexible(res.Stdout); ok && len(arr) > 0 {
+				rows := make([]map[string]string, 0, len(arr))
+				for _, m := range arr {
+					name := trimQuotes(str(firstOf(m, "name", "project")))
+					if name == "" {
+						continue
+					}
+					rows = append(rows, map[string]string{
+						"name":          name,
+						"taskCount":     str(firstOf(m, "taskCount")),
+						"resolvedCount": str(firstOf(m, "resolvedCount")),
+						"active":        str(firstOf(m, "active")),
+						"priority":      str(firstOf(m, "priority")),
+					})
+				}
+				if len(rows) > 0 {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					s.renderProjectsTable(w, r, "Projects", rows)
+					return
+				}
+			}
+			// Fallback: HTML mit Pre
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			t := template.Must(s.layoutTpl.Clone())
 			_, _ = t.New("content").Parse(`<h2>Projects</h2>
-{{if .Projects}}
-<ul style="list-style:none;padding:0;">
-{{range .Projects}}
-  <li style="margin:4px 0;"><a href="/open?html=1&q=project:{{.}}" style="color:#0366d6;text-decoration:none;">{{.}}</a></li>
-{{end}}
-</ul>
-{{else}}
-<p>No projects found.</p>
-{{end}}`)
+<pre style="white-space:pre-wrap;">{{.Out}}</pre>`)
 			uname, _ := auth.UsernameFromRequest(r)
 			show, entries, moreURL, canMore, ret := s.footerData(r, uname)
 			_ = t.Execute(w, map[string]any{
-				"Projects":    projects,
+				"Out":         strings.TrimSpace(res.Stdout),
 				"Active":      activeFromPath(r.URL.Path),
 				"Flash":       s.getFlash(r),
 				"ShowCmdLog":  show,
@@ -745,13 +694,13 @@ func (s *Server) routes() {
       <td>
         <form method="get" action="/tasks/new" style="display:inline">
           <input type="hidden" name="template" value="{{index . "id"}}" />
-          <button type="submit" title="Create a new task using this template">use</button>
+          <button type="submit">use</button>
         </form>
          · <form method="get" action="/templates/{{index . "id"}}/edit" style="display:inline">
-           <button type="submit" title="Edit this template">edit</button>
+           <button type="submit">edit</button>
          </form>
          · <form method="post" action="/templates/{{index . "id"}}/delete" style="display:inline" onsubmit="return confirm('Delete this template?');">
-           <button type="submit" title="Delete this template">delete</button>
+           <button type="submit">delete</button>
          </form>
       </td>
     </tr>
@@ -817,9 +766,9 @@ func (s *Server) routes() {
     <input name="due" placeholder="e.g. friday / 2025-12-31" />
   </div>
   <div style="margin-top:8px;">
-    <button type="submit" title="Create a new task template">Create template</button>
+    <button type="submit">Create template</button>
     <form method="get" action="/templates" style="display:inline;margin-left:8px;">
-      <button type="submit" title="Cancel and return to templates list">cancel</button>
+      <button type="submit">cancel</button>
     </form>
   </div>
  </form>
@@ -926,9 +875,9 @@ func (s *Server) routes() {
     <input name="due" value="{{.Due}}" placeholder="e.g. friday / 2025-12-31" />
   </div>
   <div style="margin-top:8px;">
-    <button type="submit" title="Save changes to template">Update template</button>
+    <button type="submit">Update template</button>
     <form method="get" action="/templates" style="display:inline;margin-left:8px;">
-      <button type="submit" title="Cancel editing and return to templates list">cancel</button>
+      <button type="submit">cancel</button>
     </form>
   </div>
 </form>
@@ -1088,8 +1037,8 @@ func (s *Server) routes() {
 <form method="post" action="/context">
   <div><label>New context (e.g. +work project:dstask): <input name="value"></label></div>
   <div>
-    <button type="submit" title="Apply new context filter">Apply</button>
-    <button type="submit" name="clear" value="1" title="Clear context filter">Clear</button>
+    <button type="submit">Apply</button>
+    <button type="submit" name="clear" value="1">Clear</button>
   </div>
 </form>`)
 			uname, _ := auth.UsernameFromRequest(r)
@@ -1191,7 +1140,7 @@ func (s *Server) routes() {
       {{range .Templates}}<option value="{{index . "id"}}" {{if eq $.SelectedTemplate (index . "id")}}selected{{end}}>#{{index . "id"}}: {{index . "summary"}}</option>{{end}}
     </select>
   </div>
-  <div style="margin-top:8px;"><button type="submit" title="Create a new task">Create</button></div>
+  <div style="margin-top:8px;"><button type="submit">Create</button></div>
  </form>
         `)
 		uname, _ := auth.UsernameFromRequest(r)
@@ -1284,9 +1233,81 @@ func (s *Server) routes() {
 
 	// Task Aktionen: /tasks/{id}/start|stop|done|remove|log|note
 	// Open URLs: /tasks/{id}/open
-	// Edit Task: /tasks/{id}/edit
 	s.mux.HandleFunc("/tasks/", func(w http.ResponseWriter, r *http.Request) {
+		// Prüfe zuerst auf GET /tasks/{id}/open für URL-Anzeige
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(parts) == 3 && parts[0] == "tasks" && parts[2] == "open" && r.Method == http.MethodGet {
+			id := parts[1]
+			if id == "" {
+				http.NotFound(w, r)
+				return
+			}
+			username, _ := auth.UsernameFromRequest(r)
+			res := s.runner.Run(username, 5*time.Second, "export")
+
+			if res.Err != nil || res.ExitCode != 0 {
+				http.Error(w, "Failed to fetch task", http.StatusBadGateway)
+				return
+			}
+
+			tasks, ok := decodeTasksJSONFlexible(res.Stdout)
+			if !ok {
+				http.Error(w, "Failed to parse tasks", http.StatusInternalServerError)
+				return
+			}
+
+			var task map[string]any
+			for _, t := range tasks {
+				if str(firstOf(t, "id", "ID")) == id {
+					task = t
+					break
+				}
+			}
+
+			if task == nil {
+				http.Error(w, "Task not found", http.StatusNotFound)
+				return
+			}
+
+			// Extract URLs from summary and notes
+			summary := str(firstOf(task, "summary", "description"))
+			notes := str(firstOf(task, "notes", "annotations"))
+
+			allText := summary + " " + notes
+			urls := extractURLs(allText)
+
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			tpl := template.Must(s.layoutTpl.Clone())
+			_, _ = tpl.New("content").Parse(`
+<h2>URLs in Task #{{.ID}}</h2>
+<p><strong>Summary:</strong> {{.Summary}}</p>
+{{if .URLs}}
+<ul>
+{{range .URLs}}
+  <li><a href="{{.}}" target="_blank" rel="noopener">{{.}}</a></li>
+{{end}}
+</ul>
+{{else}}
+<p>No URLs found in this task.</p>
+{{end}}
+<p><a href="/open?html=1">Back to tasks</a></p>
+`)
+
+			uname, _ := auth.UsernameFromRequest(r)
+			show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+			_ = tpl.Execute(w, map[string]any{
+				"ID":          id,
+				"Summary":     summary,
+				"URLs":        urls,
+				"Active":      activeFromPath(r.URL.Path),
+				"ShowCmdLog":  show,
+				"CmdEntries":  entries,
+				"MoreURL":     moreURL,
+				"CanShowMore": canMore,
+				"ReturnURL":   ret,
+			})
+			return
+		}
 
 		// GET /tasks/{id}/edit - Bearbeitungsformular anzeigen
 		if len(parts) == 3 && parts[0] == "tasks" && parts[2] == "edit" && r.Method == http.MethodGet {
@@ -1356,29 +1377,34 @@ func (s *Server) routes() {
 			projects := parseProjectsFromOutput(projRes.Stdout)
 			tags := parseTagsFromOutput(tagRes.Stdout)
 
+			// Parse task data
+			summary := trimQuotes(str(firstOf(task, "summary", "Summary", "description", "Description")))
+			project := trimQuotes(str(firstOf(task, "project", "Project")))
+			priority := str(firstOf(task, "priority", "Priority"))
+			dueValue := trimQuotes(str(firstOf(task, "due", "Due", "dueDate", "DueDate")))
+
 			// Parse existing tags from task
 			existingTags := make(map[string]bool)
-			if tagList := firstOf(task, "tags", "Tags"); tagList != nil {
-				if tagStr := joinTags(tagList); tagStr != "" {
-					for _, tag := range strings.Split(tagStr, ", ") {
-						tag = strings.TrimSpace(tag)
-						if tag != "" {
-							existingTags[tag] = true
-						}
+			taskTags := firstOf(task, "tags", "Tags")
+			if tagList, ok := taskTags.([]any); ok {
+				for _, tag := range tagList {
+					if tagStr := str(tag); tagStr != "" {
+						existingTags[tagStr] = true
+					}
+				}
+			} else if tagStr := str(taskTags); tagStr != "" {
+				for _, tag := range strings.Split(tagStr, ", ") {
+					tag = strings.TrimSpace(tag)
+					if tag != "" {
+						existingTags[tag] = true
 					}
 				}
 			}
 
-			currentSummary := trimQuotes(str(firstOf(task, "summary", "description")))
-			currentProject := trimQuotes(str(firstOf(task, "project")))
-			currentPriority := str(firstOf(task, "priority"))
-			currentDue := trimQuotes(str(firstOf(task, "due", "dueDate")))
-
 			// Parse due date to YYYY-MM-DD format if it's a date
 			dueDateValue := ""
-			dueValue := currentDue
-			if currentDue != "" {
-				if t := parseTimeOrZero(currentDue); !t.IsZero() {
+			if dueValue != "" {
+				if t := parseTimeOrZero(dueValue); !t.IsZero() {
 					dueDateValue = t.Format("2006-01-02")
 					dueValue = "" // Clear due field if we can parse it as date
 				}
@@ -1386,7 +1412,7 @@ func (s *Server) routes() {
 
 			hasProjectInSelect := false
 			for _, p := range projects {
-				if p == currentProject {
+				if p == project {
 					hasProjectInSelect = true
 					break
 				}
@@ -1413,10 +1439,10 @@ func (s *Server) routes() {
     <label>Priority:</label>
     <select name="priority">
       <option value="">(none)</option>
-      <option value="P0" {{if eq $.Priority "P0"}}selected{{end}}>P0 (Critical)</option>
-      <option value="P1" {{if eq $.Priority "P1"}}selected{{end}}>P1 (High)</option>
-      <option value="P2" {{if eq $.Priority "P2"}}selected{{end}}>P2 (Normal)</option>
-      <option value="P3" {{if eq $.Priority "P3"}}selected{{end}}>P3 (Low)</option>
+      <option value="P0" {{if eq .Priority "P0"}}selected{{end}}>P0 (Critical)</option>
+      <option value="P1" {{if eq .Priority "P1"}}selected{{end}}>P1 (High)</option>
+      <option value="P2" {{if eq .Priority "P2"}}selected{{end}}>P2 (Normal)</option>
+      <option value="P3" {{if eq .Priority "P3"}}selected{{end}}>P3 (Low)</option>
     </select>
   </div>
   <div>
@@ -1440,27 +1466,31 @@ func (s *Server) routes() {
   </div>
   <div style="margin-top:8px;">
     <button type="submit" title="Save changes to task">Update task</button>
-    <form method="get" action="/open" style="display:inline;margin-left:8px;">
-      <input type="hidden" name="html" value="1" />
-      <button type="submit" title="Cancel editing and return to task list">cancel</button>
-    </form>
+    <button type="button" onclick="window.location.href='{{.Referer}}'; return false;" style="margin-left:8px;" title="Cancel editing and return to previous page">cancel</button>
   </div>
 </form>
 `)
+
+			// Get referer for cancel button
+			referer := r.Header.Get("Referer")
+			if referer == "" {
+				referer = "/open?html=1"
+			}
 
 			uname, _ := auth.UsernameFromRequest(r)
 			show, entries, moreURL, canMore, ret := s.footerData(r, uname)
 			_ = t.Execute(w, map[string]any{
 				"TaskID":             id,
-				"Summary":            currentSummary,
-				"Project":            currentProject,
+				"Summary":            summary,
+				"Project":            project,
+				"Priority":           priority,
 				"HasProjectInSelect": hasProjectInSelect,
-				"Priority":           currentPriority,
 				"DueDate":            dueDateValue,
 				"Due":                dueValue,
 				"Projects":           projects,
 				"Tags":               tags,
 				"ExistingTags":       existingTags,
+				"Referer":            referer,
 				"Active":             activeFromPath(r.URL.Path),
 				"ShowCmdLog":         show,
 				"CmdEntries":         entries,
@@ -1549,115 +1579,24 @@ func (s *Server) routes() {
 			res := s.runner.Run(username, 10*time.Second, args...)
 			s.cmdStore.Append(username, "Edit task", args)
 			if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
-				applog.Warnf("task edit failed: code=%d timeout=%v err=%v", res.ExitCode, res.TimedOut, res.Err)
-				s.setFlash(w, "error", "Task update failed: "+res.Stderr)
+				applog.Warnf("task edit failed: code=%d timeout=%v err=%v stderr=%q", res.ExitCode, res.TimedOut, res.Err, truncate(res.Stderr, 200))
+				// Strip ANSI codes from stderr before setting flash message
+				cleanStderr := stripANSI(res.Stderr)
+				if cleanStderr != "" {
+					s.setFlash(w, "error", "Task update failed: "+cleanStderr)
+				} else {
+					s.setFlash(w, "error", "Task update failed")
+				}
 				http.Redirect(w, r, "/tasks/"+id+"/edit", http.StatusSeeOther)
 				return
 			}
 			s.setFlash(w, "success", "Task updated successfully")
-			http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
-			return
-		}
-
-		// Prüfe zuerst auf GET /tasks/{id}/open für URL-Anzeige
-		if len(parts) == 3 && parts[0] == "tasks" && parts[2] == "open" && r.Method == http.MethodGet {
-			id := parts[1]
-			if id == "" {
-				http.NotFound(w, r)
-				return
+			// Redirect to referer if available, otherwise to /open
+			referer := r.Header.Get("Referer")
+			if referer == "" {
+				referer = "/open?html=1"
 			}
-			username, _ := auth.UsernameFromRequest(r)
-
-			var task map[string]any
-
-			// Try export first (gets all non-resolved tasks)
-			res := s.runner.Run(username, 5*time.Second, "export")
-			if res.Err == nil && res.ExitCode == 0 && !res.TimedOut {
-				if tasks, ok := decodeTasksJSONFlexible(res.Stdout); ok {
-					for _, t := range tasks {
-						taskID := str(firstOf(t, "id", "ID", "Id", "uuid", "UUID"))
-						if taskID == id {
-							task = t
-							break
-						}
-					}
-				}
-			}
-
-			// Fallback 1: try dstask <id> directly (shows single task details, works for any status)
-			if task == nil {
-				showRes := s.runner.Run(username, 5*time.Second, id)
-				if showRes.Err == nil && showRes.ExitCode == 0 && !showRes.TimedOut {
-					if tasks, ok := decodeTasksJSONFlexible(showRes.Stdout); ok && len(tasks) > 0 {
-						task = tasks[0]
-					} else {
-						// If JSON parsing fails, log for debugging
-						applog.Warnf("task %s: JSON parse failed from 'dstask %s', stdout=%q", id, id, truncate(showRes.Stdout, 200))
-					}
-				} else {
-					applog.Warnf("task %s: 'dstask %s' failed, code=%d err=%v stderr=%q", id, id, showRes.ExitCode, showRes.Err, truncate(showRes.Stderr, 200))
-				}
-			}
-
-			// Fallback 2: try show-resolved in case task is resolved and not in export
-			if task == nil {
-				resolvedRes := s.runner.Run(username, 5*time.Second, "show-resolved")
-				if resolvedRes.Err == nil && resolvedRes.ExitCode == 0 && !resolvedRes.TimedOut {
-					if tasks, ok := decodeTasksJSONFlexible(resolvedRes.Stdout); ok {
-						for _, t := range tasks {
-							taskID := str(firstOf(t, "id", "ID", "Id", "uuid", "UUID"))
-							if taskID == id {
-								task = t
-								break
-							}
-						}
-					}
-				}
-			}
-
-			if task == nil {
-				applog.Warnf("task %s: not found in export, 'dstask %s', or show-resolved", id, id)
-				http.Error(w, "Task not found", http.StatusNotFound)
-				return
-			}
-
-			// Extract URLs from summary and notes
-			summary := str(firstOf(task, "summary", "description"))
-			notes := str(firstOf(task, "notes", "annotations"))
-
-			allText := summary + " " + notes
-			urls := extractURLs(allText)
-
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			tpl := template.Must(s.layoutTpl.Clone())
-			_, _ = tpl.New("content").Parse(`
-<h2>URLs in Task #{{.ID}}</h2>
-<p><strong>Summary:</strong> {{.Summary}}</p>
-{{if .URLs}}
-<ul>
-{{range .URLs}}
-  <li><a href="{{.}}" target="_blank" rel="noopener">{{.}}</a></li>
-{{end}}
-</ul>
-{{else}}
-<p>No URLs found in this task.</p>
-{{end}}
-<p><a href="/open?html=1">Back to tasks</a></p>
-`)
-
-			uname, _ := auth.UsernameFromRequest(r)
-			show, entries, moreURL, canMore, ret := s.footerData(r, uname)
-			_ = tpl.Execute(w, map[string]any{
-				"ID":          id,
-				"Summary":     summary,
-				"URLs":        urls,
-				"Active":      activeFromPath(r.URL.Path),
-				"ShowCmdLog":  show,
-				"CmdEntries":  entries,
-				"MoreURL":     moreURL,
-				"CanShowMore": canMore,
-				"ReturnURL":   ret,
-			})
+			http.Redirect(w, r, referer, http.StatusSeeOther)
 			return
 		}
 
@@ -1732,7 +1671,7 @@ func (s *Server) routes() {
     </select>
   </label></div>
   <div><label>Note (for action "note"):<br><textarea name="note" rows="3" cols="40"></textarea></label></div>
-  <div><button type="submit" title="Execute the selected action on the task">Execute</button></div>
+  <div><button type="submit">Execute</button></div>
 </form>`)
 			uname, _ := auth.UsernameFromRequest(r)
 			show, entries, moreURL, canMore, ret := s.footerData(r, uname)
@@ -1901,7 +1840,7 @@ func (s *Server) routes() {
 			t := template.Must(s.layoutTpl.Clone())
 			_, _ = t.New("content").Parse(`<h2>Sync</h2>
 <p>Runs <code>dstask sync</code> (pull, merge, push). The underlying repo must have a remote with an upstream branch.</p>
-<form method="post" action="/sync"><button type="submit" title="Sync tasks with git repository (pull, merge, push)">Sync now</button></form>`)
+<form method="post" action="/sync"><button type="submit">Sync now</button></form>`)
 			_ = t.Execute(w, nil)
 		case http.MethodPost:
 			username, _ := auth.UsernameFromRequest(r)
@@ -1937,136 +1876,6 @@ git push -u origin master</pre>`
 		}
 	})
 
-	// Help page - Web UI specific help
-	s.mux.HandleFunc("/help", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		t := template.Must(s.layoutTpl.Clone())
-		_, _ = t.New("content").Parse(`<h2>Help - dstask Web UI</h2>
-<div style="max-width:800px;line-height:1.6;">
-<h3>Overview</h3>
-<p>The dstask Web UI provides a user-friendly interface for managing tasks based on the <a href="https://github.com/naggie/dstask" target="_blank">dstask CLI</a>.</p>
-
-<h3>Navigation</h3>
-<ul>
-  <li><strong>Home</strong>: Main page of the web application</li>
-  <li><strong>Next</strong>: Shows the most important tasks (sorted by priority and creation date)</li>
-  <li><strong>Open</strong>: Shows all non-resolved tasks</li>
-  <li><strong>Active</strong>: Shows currently active tasks</li>
-  <li><strong>Paused</strong>: Shows paused tasks</li>
-  <li><strong>Resolved</strong>: Shows resolved/completed tasks</li>
-  <li><strong>Tags</strong>: List of all tags with direct filter links</li>
-  <li><strong>Projects</strong>: List of all projects with direct filter links</li>
-  <li><strong>Templates</strong>: Manage task templates</li>
-  <li><strong>New task</strong>: Create a new task</li>
-</ul>
-
-<h3>Creating Tasks</h3>
-<p>On the <strong>New task</strong> page, you can create new tasks:</p>
-<ul>
-  <li><strong>Summary</strong>: Task description (required)</li>
-  <li><strong>Project</strong>: Assign a project (select from list or enter new)</li>
-  <li><strong>Tags</strong>: Add tags (select from existing tags or enter new, comma-separated)</li>
-  <li><strong>Due</strong>: Due date (as date or relative expression like "friday", "tomorrow")</li>
-  <li><strong>Template</strong>: Use an optional template</li>
-</ul>
-
-<h3>Editing Tasks</h3>
-<p>Click the <strong>edit</strong> button in the task list to edit a task. You can modify:</p>
-<ul>
-  <li>Summary (description)</li>
-  <li>Project</li>
-  <li>Priority (P0=Critical, P1=High, P2=Normal, P3=Low)</li>
-  <li>Tags (add or remove tags)</li>
-  <li>Due (due date)</li>
-</ul>
-
-<h3>Task Actions</h3>
-<p>Each task can be modified via buttons in the task list:</p>
-<ul>
-  <li><strong>edit</strong>: Edit the task</li>
-  <li><strong>start</strong>: Mark task as active</li>
-  <li><strong>stop</strong>: Pause the task</li>
-  <li><strong>done</strong>: Mark task as completed</li>
-  <li><strong>remove</strong>: Delete the task</li>
-  <li><strong>open</strong>: Open URLs in the task (if present)</li>
-</ul>
-
-<h3>Batch Actions</h3>
-<p>Select multiple tasks using checkboxes and perform batch actions:</p>
-<ul>
-  <li><strong>start/stop/done/remove</strong>: Change status or delete</li>
-  <li><strong>note</strong>: Add a note to all selected tasks</li>
-  <li><strong>add tag</strong>: Add a tag to all selected tasks</li>
-  <li><strong>remove tag</strong>: Remove a tag from all selected tasks</li>
-  <li><strong>set priority</strong>: Set priority for all selected tasks</li>
-  <li><strong>set project</strong>: Set project for all selected tasks</li>
-  <li><strong>set due</strong>: Set due date for all selected tasks</li>
-</ul>
-
-<h3>Filtering</h3>
-<p>On list pages, you can filter tasks:</p>
-<ul>
-  <li><strong>Text filter</strong>: Search for text in the description</li>
-  <li><strong>Tag filter</strong>: <code>+tag</code> for tasks with tag, <code>-tag</code> for tasks without tag</li>
-  <li><strong>Project filter</strong>: <code>project:name</code> for tasks in a specific project</li>
-  <li><strong>Due filter</strong>:
-    <ul>
-      <li><code>due:overdue</code> - overdue tasks</li>
-      <li><code>due.before:DATE</code> - tasks due before a date</li>
-      <li><code>due.after:DATE</code> - tasks due after a date</li>
-      <li><code>due.on:DATE</code> - tasks due on a specific date</li>
-    </ul>
-    <p>Date can be specified as absolute date (YYYY-MM-DD) or relative (e.g., "friday", "tomorrow").</p>
-  </li>
-</ul>
-<p>Multiple filters can be combined, e.g.: <code>+work project:dstask due:overdue</code></p>
-
-<h3>Templates</h3>
-<p>Templates are reusable task blueprints:</p>
-<ul>
-  <li><strong>Create</strong>: Create a new template on the Templates page</li>
-  <li><strong>Use</strong>: Select a template when creating a new task</li>
-  <li><strong>Edit</strong>: Modify existing templates</li>
-  <li><strong>Delete</strong>: Remove templates that are no longer needed</li>
-</ul>
-
-<h3>URLs in Tasks</h3>
-<p>URLs in task descriptions are automatically linked. Click <strong>open</strong> next to a task to view and open all URLs in that task.</p>
-
-<h3>Priorities</h3>
-<table border="1" cellpadding="6" style="border-collapse:collapse;margin:8px 0;">
-  <tr><th>Symbol</th><th>Name</th><th>Description</th></tr>
-  <tr><td><strong>P0</strong></td><td>Critical</td><td>Must be resolved immediately</td></tr>
-  <tr><td><strong>P1</strong></td><td>High</td><td>Should be resolved in the near future</td></tr>
-  <tr><td><strong>P2</strong></td><td>Normal</td><td>Default priority</td></tr>
-  <tr><td><strong>P3</strong></td><td>Low</td><td>Low priority</td></tr>
-</table>
-
-<h3>Undo</h3>
-<p>The <strong>Undo</strong> button in the navigation reverts the last action (git revert).</p>
-
-<h3>Sorting</h3>
-<p>Click on column headers in tables to sort by that column. Click again to reverse the sort direction.</p>
-
-<h3>Notes</h3>
-<ul>
-  <li>The web app uses the dstask CLI in the background. All actions are executed as dstask commands.</li>
-  <li>The "Recent dstask commands" in the footer show the last executed commands.</li>
-  <li>For advanced features and configuration, see the <a href="https://github.com/naggie/dstask" target="_blank">dstask documentation</a>.</li>
-</ul>
-</div>`)
-		uname, _ := auth.UsernameFromRequest(r)
-		show, entries, moreURL, canMore, ret := s.footerData(r, uname)
-		_ = t.Execute(w, map[string]any{
-			"Active":      activeFromPath(r.URL.Path),
-			"ShowCmdLog":  show,
-			"CmdEntries":  entries,
-			"MoreURL":     moreURL,
-			"CanShowMore": canMore,
-			"ReturnURL":   ret,
-		})
-	})
-
 	// Undo last action
 	s.mux.HandleFunc("/undo", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -2088,37 +1897,6 @@ git push -u origin master</pre>`
 			referer = "/open?html=1"
 		}
 		http.Redirect(w, r, referer, http.StatusSeeOther)
-	})
-
-	// Logout - show logout confirmation page
-	s.mux.HandleFunc("/logout", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		// Show logout confirmation page
-		// Note: HTTP Basic Auth credentials are cached by the browser, so complete logout
-		// may require the user to close the browser or clear site data manually
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Clear-Site-Data", "\"cache\", \"cookies\", \"storage\"")
-		html := `<!doctype html>
-<html><head><meta charset="utf-8"><title>Signed out - dstask</title>
-<style>
-body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;margin:16px;text-align:center;padding-top:50px}
-h1{color:#24292e}
-p{color:#586069;max-width:600px;margin:20px auto;line-height:1.6}
-a{color:#0366d6;text-decoration:none;display:inline-block;margin-top:16px;padding:8px 16px;background:#0366d6;color:#fff;border-radius:4px}
-a:hover{background:#0256cc;text-decoration:none}
-.note{font-size:0.9em;color:#6a737d;margin-top:24px}
-</style>
-</head><body>
-<h1>Signed Out</h1>
-<p>You have been signed out successfully.</p>
-<p class="note">Note: Since HTTP Basic Auth credentials are cached by your browser, you may need to close the browser window or clear site data to fully sign out. The next time you visit this site, your browser may automatically use saved credentials.</p>
-<a href="/">Sign in again</a>
-</body></html>`
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(html))
 	})
 }
 

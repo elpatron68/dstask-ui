@@ -239,8 +239,6 @@ func activeFromPath(path string) string {
 		return "sync"
 	case strings.HasPrefix(path, "/undo"):
 		return "undo"
-	case strings.HasPrefix(path, "/help"):
-		return "help"
 	default:
 		return "home"
 	}
@@ -349,6 +347,14 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max] + "..."
+}
+
+// stripANSI removes ANSI escape sequences (e.g., color codes) from a string.
+// This is useful when displaying command output that may contain terminal formatting.
+func stripANSI(s string) string {
+	// ANSI escape sequences start with ESC (0x1b) followed by '[' and end with 'm' or other characters
+	re := regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+	return re.ReplaceAllString(s, "")
 }
 
 // sort helpers
