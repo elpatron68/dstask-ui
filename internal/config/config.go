@@ -1,12 +1,13 @@
 package config
 
 import (
-	"errors"
-	"os"
-	"path/filepath"
-	"strconv"
+    "errors"
+    "os"
+    "path/filepath"
+    "strconv"
+    "strings"
 
-	"gopkg.in/yaml.v3"
+    "gopkg.in/yaml.v3"
 )
 
 type UserConfig struct {
@@ -96,13 +97,37 @@ func applyEnvOverrides(cfg *Config) {
 // ResolveHomeForUsername bestimmt das HOME für dstask anhand der Repo-Konfiguration.
 // Erwartet, dass Repos[username] entweder auf ~/.dstask oder auf das Home-Verzeichnis zeigt.
 func ResolveHomeForUsername(cfg *Config, username string) (string, bool) {
-	p, ok := cfg.Repos[username]
-	if !ok || p == "" {
-		return "", false
-	}
-	base := filepath.Base(p)
-	if base == ".dstask" {
-		return filepath.Dir(p), true
-	}
-	return p, true
+    p, ok := cfg.Repos[username]
+    if !ok || p == "" {
+        return "", false
+    }
+
+    // Expand ~ und Umgebungsvariablen
+    p = expandUserPath(p)
+    p = os.ExpandEnv(p)
+    p = filepath.Clean(p)
+
+    base := filepath.Base(p)
+    if base == ".dstask" {
+        return filepath.Dir(p), true
+    }
+    return p, true
+}
+
+// expandUserPath ersetzt führendes "~" durch das Home-Verzeichnis des aktuellen Prozesses.
+// Unterstützt nur "~" (nicht "~user").
+func expandUserPath(path string) string {
+    if path == "" {
+        return path
+    }
+    if strings.HasPrefix(path, "~") {
+        // Nur direktes ~ oder ~/...
+        if len(path) == 1 || path[1] == '/' || path[1] == '\\' {
+            if home, err := os.UserHomeDir(); err == nil && home != "" {
+                // Ersetze nur das führende ~
+                return filepath.Join(home, strings.TrimPrefix(path, "~"))
+            }
+        }
+    }
+    return path
 }

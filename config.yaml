@@ -22,7 +22,8 @@ repos:
   # admin: "C:\\Users\\admin"
   # Example 2 (direct .dstask):
   # admin: "C:\\Users\\admin\\.dstask"
-  admin: "C:\\Users\\mbusc\\.dstask"
+  # admin: "C:\\Users\\mbusc\\.dstask"
+  admin: "~/.dstask"
 
 logging:
   level: "info"   # debug | info | warn | error

@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"html/template"
+	"os"
 	"net/http"
 	"strings"
 	"time"
@@ -210,24 +211,58 @@ func (s *Server) routes() {
 		_, _ = w.Write([]byte("ok"))
 	})
 
-	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		t := template.Must(s.layoutTpl.Clone())
-		_, _ = t.New("content").Parse(`<h1>dstask Web UI</h1><p>Signed in as: {{.User}}</p>
-<form method="post" action="/sync" style="margin-top:8px"><button type="submit">Sync</button></form>`) // placeholder
-		username, _ := auth.UsernameFromRequest(r)
-		show, entries, moreURL, canMore, ret := s.footerData(r, username)
-		_ = t.Execute(w, map[string]any{
-			"User":        username,
-			"Active":      activeFromPath(r.URL.Path),
-			"Flash":       s.getFlash(r),
-			"ShowCmdLog":  show,
-			"CmdEntries":  entries,
-			"MoreURL":     moreURL,
-			"CanShowMore": canMore,
-			"ReturnURL":   ret,
-		})
-	})
+    s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Type", "text/html; charset=utf-8")
+        t := template.Must(s.layoutTpl.Clone())
+        _, _ = t.New("content").Parse(`<h1>dstask Web UI</h1><p>Signed in as: {{.User}}</p>
+{{if .IsGitRepo}}
+  {{if .RemoteURL}}
+    <div style="margin:8px 0;">Remote: <code>{{.RemoteURL}}</code></div>
+    <form method="post" action="/sync" style="margin-top:8px"><button type="submit">Sync</button></form>
+  {{else}}
+    <div style="margin:8px 0;background:#fff3cd;border:1px solid #ffeeba;padding:8px;">Kein Git-Remote konfiguriert. Sync erfordert ein Remote-Repository.</div>
+    <form method="post" action="/sync" style="margin-top:8px"><button type="submit">Sync…</button></form>
+    <form method="post" action="/sync/set-remote" style="display:inline;margin-left:8px;">
+      <input name="url" placeholder="https://... oder git@..." style="width:50%" required />
+      <button type="submit">Remote speichern</button>
+      <a href="/" style="margin-left:8px;">abbrechen</a>
+    </form>
+  {{end}}
+{{else}}
+  <div style="margin:8px 0;background:#fff3cd;border:1px solid #ffeeba;padding:8px;">Kein Git-Repository im .dstask-Verzeichnis. Du kannst ein Remote hier klonen.</div>
+  <form method="post" action="/sync/clone-remote">
+    <input name="url" placeholder="https://... oder git@..." style="width:50%" required />
+    <button type="submit">Remote klonen</button>
+    <a href="/" style="margin-left:8px;">abbrechen</a>
+  </form>
+{{end}}`) // placeholder
+        username, _ := auth.UsernameFromRequest(r)
+        remoteURL, _ := s.runner.GitRemoteURL(username)
+        // Prüfe Git-Repo vorhanden
+        isRepo := false
+        if home, ok := config.ResolveHomeForUsername(s.cfg, username); ok && home != "" {
+            dir := home
+            if !strings.HasSuffix(strings.ToLower(dir), ".dstask") {
+                dir = dir + string('/') + ".dstask"
+            }
+            if fi, err := os.Stat(dir + string('/') + ".git"); err == nil && fi.IsDir() {
+                isRepo = true
+            }
+        }
+        show, entries, moreURL, canMore, ret := s.footerData(r, username)
+        _ = t.Execute(w, map[string]any{
+            "User":        username,
+            "RemoteURL":   remoteURL,
+            "IsGitRepo":   isRepo,
+            "Active":      activeFromPath(r.URL.Path),
+            "Flash":       s.getFlash(r),
+            "ShowCmdLog":  show,
+            "CmdEntries":  entries,
+            "MoreURL":     moreURL,
+            "CanShowMore": canMore,
+            "ReturnURL":   ret,
+        })
+    })
 
 	s.mux.HandleFunc("/next", func(w http.ResponseWriter, r *http.Request) {
 		username, _ := auth.UsernameFromRequest(r)
@@ -1920,7 +1955,53 @@ func (s *Server) routes() {
 			_ = t.Execute(w, nil)
 		case http.MethodPost:
 			username, _ := auth.UsernameFromRequest(r)
+			applog.Infof("/sync POST von %s", username)
+            // Falls kein Git-Repo vorhanden ist, biete Clone-Form an
+            if uhome, ok := config.ResolveHomeForUsername(s.cfg, username); ok && uhome != "" {
+                dir := uhome
+                if !strings.HasSuffix(strings.ToLower(dir), ".dstask") {
+                    dir = dir + string('/') + ".dstask"
+                }
+                if _, err := os.Stat(dir + string('/') + ".git"); err != nil {
+                    w.Header().Set("Content-Type", "text/html; charset=utf-8")
+                    t := template.Must(s.layoutTpl.Clone())
+                    _, _ = t.New("content").Parse(`<h2>Clone remote</h2>
+<p>Kein Git-Repository gefunden. Bitte gib eine Remote-URL an, um sie in <code>~/.dstask</code> zu klonen.</p>
+<form method="post" action="/sync/clone-remote">
+  <div><label>Remote URL: <input name="url" required style="width:60%" placeholder="https://... oder git@..." /></label></div>
+  <div style="margin-top:8px;">
+    <button type="submit">Klonen</button>
+    <a href="/" style="margin-left:8px;">abbrechen</a>
+  </div>
+</form>`)
+                    _ = t.Execute(w, nil)
+                    return
+                }
+            }
+            // Falls kein Remote gesetzt ist, biete Remote-Form an
+            if u, _ := s.runner.GitRemoteURL(username); strings.TrimSpace(u) == "" {
+				applog.Warnf("/sync: kein Remote konfiguriert für %s", username)
+                w.Header().Set("Content-Type", "text/html; charset=utf-8")
+                t := template.Must(s.layoutTpl.Clone())
+                _, _ = t.New("content").Parse(`<h2>Configure remote</h2>
+<p>Für Sync ist ein Remote-Repository erforderlich. Bitte gib eine Git-Remote-URL an (z. B. <code>git@github.com:user/repo.git</code> oder <code>https://github.com/user/repo.git</code>).</p>
+<form method="post" action="/sync/set-remote">
+  <div><label>Remote URL: <input name="url" required style="width:60%" placeholder="https://... or git@..." /></label></div>
+  <div style="margin-top:8px;">
+    <button type="submit">Remote speichern</button>
+    <a href="/" style="margin-left:8px;">abbrechen</a>
+  </div>
+</form>`)
+                _ = t.Execute(w, nil)
+                return
+            }
+            // Upstream sicherstellen (best effort)
+            if _, err := s.runner.GitSetUpstreamIfMissing(username); err != nil {
+                applog.Warnf("/sync: Upstream fehlte; automatisches Setzen ist fehlgeschlagen: %v", err)
+            }
+            applog.Infof("/sync: starte dstask sync für %s", username)
 			res := s.runner.Run(username, 30_000_000_000, "sync") // 30s
+			applog.Infof("/sync: beendet für %s: code=%d timeout=%v err=%v", username, res.ExitCode, res.TimedOut, res.Err)
 			s.cmdStore.Append(username, "Sync", []string{"sync"})
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			t := template.Must(s.layoutTpl.Clone())
@@ -1951,6 +2032,72 @@ git push -u origin master</pre>`
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
+
+    // Remote setzen
+    s.mux.HandleFunc("/sync/set-remote", func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodPost {
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+        if err := r.ParseForm(); err != nil {
+            http.Error(w, "invalid form", http.StatusBadRequest)
+            return
+        }
+        url := strings.TrimSpace(r.FormValue("url"))
+        if url == "" {
+            http.Error(w, "url required", http.StatusBadRequest)
+            return
+        }
+        username, _ := auth.UsernameFromRequest(r)
+        applog.Infof("/sync/set-remote von %s: url=%s", username, url)
+        if err := s.runner.GitSetRemoteOrigin(username, url); err != nil {
+            s.setFlash(w, "error", "Remote konnte nicht gesetzt werden: "+stripANSI(err.Error()))
+            http.Redirect(w, r, "/", http.StatusSeeOther)
+            return
+        }
+        // Upstream setzen, falls nötig (best effort)
+        if _, err := s.runner.GitSetUpstreamIfMissing(username); err != nil {
+            applog.Warnf("/sync/set-remote: Upstream setzen fehlgeschlagen: %v", err)
+            // Tipp geben, aber nicht als fatal behandeln
+            s.setFlash(w, "warning", "Remote gesetzt. Upstream konnte nicht automatisch gesetzt werden. Bitte im Repo setzen.")
+            http.Redirect(w, r, "/", http.StatusSeeOther)
+            return
+        }
+        s.setFlash(w, "success", "Remote konfiguriert. Du kannst jetzt Sync ausführen.")
+        http.Redirect(w, r, "/", http.StatusSeeOther)
+    })
+
+    // Remote klonen
+    s.mux.HandleFunc("/sync/clone-remote", func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodPost {
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+        if err := r.ParseForm(); err != nil {
+            http.Error(w, "invalid form", http.StatusBadRequest)
+            return
+        }
+        url := strings.TrimSpace(r.FormValue("url"))
+        if url == "" {
+            http.Error(w, "url required", http.StatusBadRequest)
+            return
+        }
+        username, _ := auth.UsernameFromRequest(r)
+        applog.Infof("/sync/clone-remote von %s: url=%s", username, url)
+        if err := s.runner.GitCloneRemote(username, url); err != nil {
+            s.setFlash(w, "error", "Klonen fehlgeschlagen: "+stripANSI(err.Error()))
+            http.Redirect(w, r, "/", http.StatusSeeOther)
+            return
+        }
+        if _, err := s.runner.GitSetUpstreamIfMissing(username); err != nil {
+            applog.Warnf("/sync/clone-remote: Upstream setzen fehlgeschlagen: %v", err)
+            s.setFlash(w, "warning", "Klonen erfolgreich. Upstream konnte nicht automatisch gesetzt werden.")
+            http.Redirect(w, r, "/", http.StatusSeeOther)
+            return
+        }
+        s.setFlash(w, "success", "Repository geklont. Du kannst jetzt Sync ausführen.")
+        http.Redirect(w, r, "/", http.StatusSeeOther)
+    })
 
 	// Undo last action
 	s.mux.HandleFunc("/undo", func(w http.ResponseWriter, r *http.Request) {

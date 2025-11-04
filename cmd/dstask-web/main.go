@@ -8,6 +8,7 @@ import (
 	"github.com/elpatron68/dstask-ui/internal/auth"
 	"github.com/elpatron68/dstask-ui/internal/config"
 	applog "github.com/elpatron68/dstask-ui/internal/log"
+    "github.com/elpatron68/dstask-ui/internal/dstask"
 	"github.com/elpatron68/dstask-ui/internal/server"
 )
 
@@ -54,7 +55,21 @@ func main() {
 		}
 	}
 
-	srv := server.NewServerWithConfig(userStore, cfg)
+    // Startup-Checks: dstask-Binary + Repo(s)
+    usernames := make([]string, 0, len(cfg.Repos))
+    for uname := range cfg.Repos {
+        usernames = append(usernames, uname)
+    }
+    // Wenn keine Repos konfiguriert, verwende den konfigurierten/an Umgebungsvariablen hängenden Login-Nutzer,
+    // damit zumindest das Repo im Prozess-HOME initialisiert wird.
+    if len(usernames) == 0 {
+        usernames = append(usernames, username)
+    }
+    if err := dstask.EnsureReady(cfg, usernames); err != nil {
+        stdlog.Fatalf("startup check failed: %v", err)
+    }
+
+    srv := server.NewServerWithConfig(userStore, cfg)
 
 	stdlog.Printf("dstask web UI listening on %s", listenAddr)
 	if err := http.ListenAndServe(listenAddr, srv.Handler()); err != nil {
