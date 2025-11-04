@@ -34,10 +34,11 @@ func NewServerWithConfig(userStore auth.UserStore, cfg *config.Config) *Server {
 	s.mux = http.NewServeMux()
 	s.cmdStore = ui.NewCommandLogStore(cfg.UI.CommandLogMax)
 
-	// Templates: register helpers (e.g., split, linkifyURLs)
+	// Templates: register helpers (e.g., split, linkifyURLs, renderMarkdown)
 	baseTpl := template.New("layout").Funcs(template.FuncMap{
-		"split":       func(s, sep string) []string { return strings.Split(s, sep) },
-		"linkifyURLs": linkifyURLs,
+		"split":          func(s, sep string) []string { return strings.Split(s, sep) },
+		"linkifyURLs":    linkifyURLs,
+		"renderMarkdown": renderMarkdown,
 	})
 	s.layoutTpl = template.Must(baseTpl.Parse(`<!doctype html><html><head><meta charset="utf-8"><title>dstask</title>
 <style>
@@ -68,6 +69,23 @@ table, th, td, table pre {font-size:13px}
 .badge.prio.P3{background:#e5e7eb;color:#374151}
 .pill{display:inline-block;padding:2px 6px;border-radius:999px;background:#e5e7eb;color:#374151;margin-right:6px;font-size:inherit}
 .due.overdue{color:#991b1b;font-weight:600}
+.notes-content{padding:12px;background:#f9fafb;border-left:3px solid #0366d6;font-size:14px;line-height:1.6}
+.notes-content h1,.notes-content h2,.notes-content h3,.notes-content h4,.notes-content h5,.notes-content h6{margin-top:12px;margin-bottom:8px;font-weight:600}
+.notes-content h1{font-size:1.5em}
+.notes-content h2{font-size:1.3em}
+.notes-content h3{font-size:1.1em}
+.notes-content p{margin:8px 0}
+.notes-content pre{background:#fff;border:1px solid #d0d7de;padding:8px;overflow-x:auto;border-radius:3px}
+.notes-content code{background:#f6f8fa;padding:2px 4px;border-radius:3px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;font-size:0.9em}
+.notes-content pre code{background:transparent;padding:0}
+.notes-content ul,.notes-content ol{margin-left:20px;margin-top:8px;margin-bottom:8px}
+.notes-content li{margin:4px 0}
+.notes-content blockquote{border-left:3px solid #d0d7de;padding-left:12px;margin:8px 0;color:#6a737d}
+.notes-content a{color:#0366d6;text-decoration:none}
+.notes-content a:hover{text-decoration:underline}
+.notes-content table{border-collapse:collapse;width:100%;margin:8px 0}
+.notes-content table th,.notes-content table td{border:1px solid #d0d7de;padding:6px}
+.notes-content table th{background:#f6f8fa;font-weight:600}
 </style>
 </head><body>
 <nav>
@@ -333,6 +351,7 @@ func (s *Server) routes() {
 						"resolved": trimQuotes(str(firstOf(t, "resolved"))),
 						"age":      ageInDays(trimQuotes(str(firstOf(t, "created")))),
 						"tags":     joinTags(firstOf(t, "tags")),
+						"notes":    trimQuotes(str(firstOf(t, "notes", "annotations", "note"))),
 					})
 				}
 				rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
@@ -1490,6 +1509,12 @@ func (s *Server) routes() {
     <label>Notes (markdown supported):
       <textarea name="notes" rows="10" style="width:100%;font-family:monospace;">{{.Notes}}</textarea>
     </label>
+    {{if .Notes}}
+    <div style="margin-top:8px;">
+      <strong>Preview:</strong>
+      <div class="notes-content">{{renderMarkdown .Notes}}</div>
+    </div>
+    {{end}}
   </div>
   <div style="margin-top:8px;">
     <button type="submit" title="Save changes to task">Update task</button>

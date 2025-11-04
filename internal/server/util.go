@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gomarkdown/markdown"
 )
 
 func getAny(m map[string]any, key string) any {
@@ -115,6 +117,7 @@ func parseOpenPlain(raw string) []map[string]string {
 				"summary":  trimQuotes(m[4]),
 				"due":      "",
 				"tags":     "",
+				"notes":    "",
 			})
 			continue
 		}
@@ -596,6 +599,7 @@ func parseTasksLooseFromJSONText(raw string) []map[string]string {
 	reProject := regexp.MustCompile(`"project"\s*:\s*"([^"]*)"`)
 	rePriority := regexp.MustCompile(`"priority"\s*:\s*"([^"]*)"`)
 	reDue := regexp.MustCompile(`"due"\s*:\s*"([^"]*)"`)
+	reNotes := regexp.MustCompile(`"notes"\s*:\s*"([^"]*)"`)
 	for _, p := range parts {
 		id := firstGroup(reID.FindStringSubmatch(p))
 		if id == "" {
@@ -605,6 +609,7 @@ func parseTasksLooseFromJSONText(raw string) []map[string]string {
 		project := trimQuotes(firstGroup(reProject.FindStringSubmatch(p)))
 		priority := firstGroup(rePriority.FindStringSubmatch(p))
 		due := trimQuotes(firstGroup(reDue.FindStringSubmatch(p)))
+		notes := trimQuotes(firstGroup(reNotes.FindStringSubmatch(p)))
 		rows = append(rows, map[string]string{
 			"id":       id,
 			"summary":  summary,
@@ -612,6 +617,7 @@ func parseTasksLooseFromJSONText(raw string) []map[string]string {
 			"priority": priority,
 			"due":      due,
 			"tags":     "",
+			"notes":    notes,
 		})
 	}
 	return rows
@@ -987,4 +993,15 @@ func linkifyURLs(text string) template.HTML {
 	}
 
 	return template.HTML(result.String())
+}
+
+// renderMarkdown konvertiert Markdown-Text zu HTML und gibt es als template.HTML zurück,
+// damit es nicht noch einmal escaped wird.
+func renderMarkdown(text string) template.HTML {
+	if text == "" {
+		return template.HTML("")
+	}
+	// Konvertiere Markdown zu HTML
+	html := markdown.ToHTML([]byte(text), nil, nil)
+	return template.HTML(html)
 }

@@ -242,7 +242,7 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
   {{range .Rows}}
     <tr>
       <td><input type="checkbox" name="ids" value="{{index . "id"}}" form="batchForm"/></td>
-      <td>{{index . "id"}}{{if .hasNotes}} <span title="This task has notes">📝</span>{{end}}</td>
+      <td>{{index . "id"}}{{if .hasNotes}} <span title="This task has notes">📝</span> <button type="button" onclick="var row=document.getElementById('notes-row-{{index . "id"}}');row.style.display=row.style.display==='none'?'table-row':'none';this.textContent=row.style.display==='none'?'Show notes':'Hide notes';" style="background:#f6f8fa;border:1px solid #d0d7de;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:11px;margin-left:4px;">Show notes</button>{{end}}</td>
       <td><span class="badge status {{index . "status"}}" title="{{index . "status"}}">{{index . "status"}}</span></td>
       <td style="white-space:pre-wrap;">{{linkifyURLs (index . "summary")}}</td>
       <td>{{index . "project"}}</td>
@@ -266,6 +266,13 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
          {{if .hasURLs}} · <a href="/tasks/{{index . "id"}}/open" title="View and open URLs from this task">open</a>{{end}}
       </td>
     </tr>
+    {{if .hasNotes}}
+    <tr id="notes-row-{{index . "id"}}" style="display:none;">
+      <td colspan="12">
+        <div class="notes-content">{{renderMarkdown (index . "notes")}}</div>
+      </td>
+    </tr>
+    {{end}}
   {{end}}
   </tbody>
 </table>
