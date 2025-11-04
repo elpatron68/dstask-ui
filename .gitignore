@@ -9,6 +9,7 @@
 # Logs and coverage
 *.log
 coverage.out
+coverage
 
 # Editor/OS
 .vscode/
