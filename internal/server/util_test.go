@@ -1,6 +1,7 @@
 package server
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -115,5 +116,64 @@ func TestApplyDueFilter(t *testing.T) {
 	out = applyDueFilter(rows, "")
 	if len(out) != len(rows) {
 		t.Fatalf("empty filter should return all rows: expected %d, got %d", len(rows), len(out))
+	}
+}
+
+func TestExtractURLs(t *testing.T) {
+	tests := []struct {
+		input string
+		want  int
+	}{
+		{"No URLs here", 0},
+		{"Check https://example.com for details", 1},
+		{"See https://foo.com and http://bar.org", 2},
+		{"Same URL: https://test.com and https://test.com", 1}, // deduplicate
+		{"URL with trailing punct: https://example.com.", 1},
+	}
+
+	for _, tt := range tests {
+		urls := extractURLs(tt.input)
+		if len(urls) != tt.want {
+			t.Errorf("extractURLs(%q) = %d URLs, want %d", tt.input, len(urls), tt.want)
+		}
+	}
+}
+
+func TestSummaryTokens(t *testing.T) {
+	tests := []struct {
+		input        string
+		wantContains string // Token sollte enthalten sein
+	}{
+		{"test http://localhost:8080 tasks", "http://localhost:8080"},
+		{"fix bug https://example.com/page with details", "https://example.com/page"},
+		{"task / note separator", "task"},                                              // '/' sollte entfernt werden (außerhalb URLs)
+		{"task https://example.com/path with / separator", "https://example.com/path"}, // URL sollte intakt bleiben
+	}
+
+	for _, tt := range tests {
+		tokens := summaryTokens(tt.input)
+		found := false
+		for _, token := range tokens {
+			if strings.Contains(token, tt.wantContains) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("summaryTokens(%q) should contain %q, got tokens: %v", tt.input, tt.wantContains, tokens)
+		}
+	}
+
+	// Spezieller Test: URL sollte als ein Token kommen
+	tokens := summaryTokens("test http://localhost:8080 new")
+	urlFound := false
+	for _, token := range tokens {
+		if token == "http://localhost:8080" {
+			urlFound = true
+			break
+		}
+	}
+	if !urlFound {
+		t.Errorf("summaryTokens should preserve URL as single token, got: %v", tokens)
 	}
 }

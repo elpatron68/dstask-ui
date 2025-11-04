@@ -34,9 +34,10 @@ func NewServerWithConfig(userStore auth.UserStore, cfg *config.Config) *Server {
 	s.mux = http.NewServeMux()
 	s.cmdStore = ui.NewCommandLogStore(cfg.UI.CommandLogMax)
 
-	// Templates: register helpers (e.g., split)
+	// Templates: register helpers (e.g., split, linkifyURLs)
 	baseTpl := template.New("layout").Funcs(template.FuncMap{
-		"split": func(s, sep string) []string { return strings.Split(s, sep) },
+		"split":       func(s, sep string) []string { return strings.Split(s, sep) },
+		"linkifyURLs": linkifyURLs,
 	})
 	s.layoutTpl = template.Must(baseTpl.Parse(`<!doctype html><html><head><meta charset="utf-8"><title>dstask</title>
 <style>
@@ -83,6 +84,9 @@ table, th, td, table pre {font-size:13px}
   <a href="/tasks/new" class="{{if eq .Active "new"}}active{{end}}">New task</a>
   <a href="/tasks/action" class="{{if eq .Active "action"}}active{{end}}">Actions</a>
   <a href="/version" class="{{if eq .Active "version"}}active{{end}}">Version</a>
+  <form method="post" action="/undo" style="display:inline;margin-left:8px;">
+    <button type="submit" style="background:#f59e0b;color:#fff;border:none;padding:6px 10px;border-radius:4px;cursor:pointer;">Undo</button>
+  </form>
 </nav>
 {{ template "content" . }}
 {{ if .ShowCmdLog }}
@@ -678,7 +682,7 @@ func (s *Server) routes() {
     <th>Summary</th>
     <th>Project</th>
     <th>Tags</th>
-    <th style="width:160px;">Actions</th>
+    <th style="width:200px;">Actions</th>
   </tr></thead>
   <tbody>
   {{range .Templates}}
@@ -687,7 +691,18 @@ func (s *Server) routes() {
       <td><pre style="margin:0;white-space:pre-wrap;">{{index . "summary"}}</pre></td>
       <td>{{index . "project"}}</td>
       <td>{{index . "tags"}}</td>
-      <td><a href="/tasks/new?template={{index . "id"}}">Use template</a></td>
+      <td>
+        <form method="get" action="/tasks/new" style="display:inline">
+          <input type="hidden" name="template" value="{{index . "id"}}" />
+          <button type="submit">use</button>
+        </form>
+         · <form method="get" action="/templates/{{index . "id"}}/edit" style="display:inline">
+           <button type="submit">edit</button>
+         </form>
+         · <form method="post" action="/templates/{{index . "id"}}/delete" style="display:inline" onsubmit="return confirm('Delete this template?');">
+           <button type="submit">delete</button>
+         </form>
+      </td>
     </tr>
   {{end}}
   </tbody>
@@ -752,7 +767,9 @@ func (s *Server) routes() {
   </div>
   <div style="margin-top:8px;">
     <button type="submit">Create template</button>
-    <a href="/templates" style="margin-left:8px;">Cancel</a>
+    <form method="get" action="/templates" style="display:inline;margin-left:8px;">
+      <button type="submit">cancel</button>
+    </form>
   </div>
  </form>
         `)
@@ -768,6 +785,238 @@ func (s *Server) routes() {
 			"CanShowMore": canMore,
 			"ReturnURL":   ret,
 		})
+	})
+
+	// Template bearbeiten (Form)
+	s.mux.HandleFunc("/templates/", func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(parts) < 3 || parts[0] != "templates" {
+			http.NotFound(w, r)
+			return
+		}
+		templateID := parts[1]
+		action := parts[2]
+
+		username, _ := auth.UsernameFromRequest(r)
+
+		// GET /templates/{id}/edit - Bearbeitungsformular anzeigen
+		if action == "edit" && r.Method == http.MethodGet {
+			// Hole aktuelles Template
+			res := s.runner.Run(username, 5_000_000_000, "show-templates")
+			if res.Err != nil && !res.TimedOut {
+				http.Error(w, res.Stderr, http.StatusBadGateway)
+				return
+			}
+			templates := parseTemplatesFromOutput(res.Stdout)
+			var currentTemplate map[string]string
+			for _, t := range templates {
+				if t["id"] == templateID {
+					currentTemplate = t
+					break
+				}
+			}
+			if currentTemplate == nil {
+				s.setFlash(w, "error", "Template not found")
+				http.Redirect(w, r, "/templates", http.StatusSeeOther)
+				return
+			}
+
+			// Fetch existing projects and tags
+			projRes := s.runner.Run(username, 5_000_000_000, "show-projects")
+			tagRes := s.runner.Run(username, 5_000_000_000, "show-tags")
+			projects := parseProjectsFromOutput(projRes.Stdout)
+			tags := parseTagsFromOutput(tagRes.Stdout)
+
+			// Parse existing tags from template
+			existingTags := make(map[string]bool)
+			if tagStr := currentTemplate["tags"]; tagStr != "" {
+				for _, tag := range strings.Split(tagStr, ", ") {
+					tag = strings.TrimSpace(tag)
+					if tag != "" {
+						existingTags[tag] = true
+					}
+				}
+			}
+
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			t := template.Must(s.layoutTpl.Clone())
+			_, _ = t.New("content").Parse(`
+<h2>Edit template #{{.TemplateID}}</h2>
+<form method="post" action="/templates/{{.TemplateID}}/edit">
+  <div><label>Summary: <input name="summary" value="{{.Summary}}" required style="width:60%"></label></div>
+  <div>
+    <label>Project:</label>
+    <select name="projectSelect">
+      <option value="">(none)</option>
+      {{range .Projects}}
+        <option value="{{.}}" {{if eq $.Project .}}selected{{end}}>{{.}}</option>
+      {{end}}
+    </select>
+    <span style="margin:0 8px;">or</span>
+    <input name="project" value="{{if not .HasProjectInSelect}}{{.Project}}{{end}}" placeholder="new project" />
+  </div>
+  <div>
+    <label>Tags:</label>
+    <div style="max-height:140px;overflow:auto;border:1px solid #ddd;padding:6px;">
+      {{range .Tags}}
+        <label style="display:inline-block;margin-right:8px;">
+          <input type="checkbox" name="tagsExisting" value="{{.}}" {{if index $.ExistingTags .}}checked{{end}}/> {{.}}
+        </label>
+      {{end}}
+    </div>
+    <div style="margin-top:6px;">
+      <label>Add tags (comma-separated): <input name="tags" placeholder="additional tags"></label>
+    </div>
+  </div>
+  <div>
+    <label>Due:</label>
+    <input type="date" name="dueDate" value="{{.DueDate}}" />
+    <span style="margin:0 8px;">or</span>
+    <input name="due" value="{{.Due}}" placeholder="e.g. friday / 2025-12-31" />
+  </div>
+  <div style="margin-top:8px;">
+    <button type="submit">Update template</button>
+    <form method="get" action="/templates" style="display:inline;margin-left:8px;">
+      <button type="submit">cancel</button>
+    </form>
+  </div>
+</form>
+`)
+			uname, _ := auth.UsernameFromRequest(r)
+			show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+
+			// Parse due date to YYYY-MM-DD format if it's a date
+			dueDateValue := ""
+			dueValue := currentTemplate["due"]
+			if dueValue != "" {
+				if t := parseTimeOrZero(dueValue); !t.IsZero() {
+					dueDateValue = t.Format("2006-01-02")
+					dueValue = "" // Clear due field if we can parse it as date
+				}
+			}
+
+			hasProjectInSelect := false
+			for _, p := range projects {
+				if p == currentTemplate["project"] {
+					hasProjectInSelect = true
+					break
+				}
+			}
+
+			_ = t.Execute(w, map[string]any{
+				"TemplateID":         templateID,
+				"Summary":            currentTemplate["summary"],
+				"Project":            currentTemplate["project"],
+				"HasProjectInSelect": hasProjectInSelect,
+				"DueDate":            dueDateValue,
+				"Due":                dueValue,
+				"Projects":           projects,
+				"Tags":               tags,
+				"ExistingTags":       existingTags,
+				"Active":             activeFromPath(r.URL.Path),
+				"ShowCmdLog":         show,
+				"CmdEntries":         entries,
+				"MoreURL":            moreURL,
+				"CanShowMore":        canMore,
+				"ReturnURL":          ret,
+			})
+			return
+		}
+
+		// POST /templates/{id}/edit - Template aktualisieren
+		if action == "edit" && r.Method == http.MethodPost {
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "invalid form", http.StatusBadRequest)
+				return
+			}
+			summary := strings.TrimSpace(r.FormValue("summary"))
+			if summary == "" {
+				http.Error(w, "summary required", http.StatusBadRequest)
+				return
+			}
+
+			tags := strings.TrimSpace(r.FormValue("tags"))
+			project := strings.TrimSpace(r.FormValue("project"))
+			if ps := strings.TrimSpace(r.FormValue("projectSelect")); ps != "" {
+				project = ps
+			}
+			dueDate := strings.TrimSpace(r.FormValue("dueDate"))
+			due := strings.TrimSpace(r.FormValue("due"))
+			if dueDate != "" {
+				due = dueDate
+			}
+
+			// Lösche altes Template
+			delRes := s.runner.Run(username, 5_000_000_000, "delete", templateID)
+			if delRes.Err != nil && !delRes.TimedOut {
+				applog.Warnf("template delete failed: %v", delRes.Err)
+				// Continue anyway - maybe template doesn't exist or already deleted
+			}
+
+			// Erstelle neues Template mit aktualisierten Werten
+			args := []string{"template"}
+			args = append(args, summaryTokens(summary)...)
+			for _, t := range r.Form["tagsExisting"] {
+				t = strings.TrimSpace(t)
+				if t == "" {
+					continue
+				}
+				t = normalizeTag(t)
+				if !strings.HasPrefix(t, "+") {
+					args = append(args, "+"+t)
+				} else {
+					args = append(args, t)
+				}
+			}
+			if tags != "" {
+				for _, t := range strings.Split(tags, ",") {
+					t = strings.TrimSpace(t)
+					if t == "" {
+						continue
+					}
+					t = normalizeTag(t)
+					if !strings.HasPrefix(t, "+") {
+						args = append(args, "+"+t)
+					} else {
+						args = append(args, t)
+					}
+				}
+			}
+			if project != "" {
+				args = append(args, "project:"+project)
+			}
+			if due != "" {
+				args = append(args, "due:"+quoteIfNeeded(due))
+			}
+
+			res := s.runner.Run(username, 10_000_000_000, args...)
+			s.cmdStore.Append(username, "Update template", args)
+			if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
+				applog.Warnf("template update failed: code=%d timeout=%v err=%v", res.ExitCode, res.TimedOut, res.Err)
+				s.setFlash(w, "error", "Template update failed: "+res.Stderr)
+				http.Redirect(w, r, "/templates/"+templateID+"/edit", http.StatusSeeOther)
+				return
+			}
+			s.setFlash(w, "success", "Template updated successfully")
+			http.Redirect(w, r, "/templates", http.StatusSeeOther)
+			return
+		}
+
+		// POST /templates/{id}/delete - Template löschen
+		if action == "delete" && r.Method == http.MethodPost {
+			res := s.runner.Run(username, 5_000_000_000, "delete", templateID)
+			s.cmdStore.Append(username, "Delete template", []string{"delete", templateID})
+			if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
+				applog.Warnf("template deletion failed: code=%d timeout=%v err=%v", res.ExitCode, res.TimedOut, res.Err)
+				s.setFlash(w, "error", "Template deletion failed: "+res.Stderr)
+			} else {
+				s.setFlash(w, "success", "Template deleted successfully")
+			}
+			http.Redirect(w, r, "/templates", http.StatusSeeOther)
+			return
+		}
+
+		http.NotFound(w, r)
 	})
 
 	// Context anzeigen/setzen
@@ -983,7 +1232,83 @@ func (s *Server) routes() {
 	})
 
 	// Task Aktionen: /tasks/{id}/start|stop|done|remove|log|note
+	// Open URLs: /tasks/{id}/open
 	s.mux.HandleFunc("/tasks/", func(w http.ResponseWriter, r *http.Request) {
+		// Prüfe zuerst auf GET /tasks/{id}/open für URL-Anzeige
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(parts) == 3 && parts[0] == "tasks" && parts[2] == "open" && r.Method == http.MethodGet {
+			id := parts[1]
+			if id == "" {
+				http.NotFound(w, r)
+				return
+			}
+			username, _ := auth.UsernameFromRequest(r)
+			res := s.runner.Run(username, 5*time.Second, "export")
+
+			if res.Err != nil || res.ExitCode != 0 {
+				http.Error(w, "Failed to fetch task", http.StatusBadGateway)
+				return
+			}
+
+			tasks, ok := decodeTasksJSONFlexible(res.Stdout)
+			if !ok {
+				http.Error(w, "Failed to parse tasks", http.StatusInternalServerError)
+				return
+			}
+
+			var task map[string]any
+			for _, t := range tasks {
+				if str(firstOf(t, "id", "ID")) == id {
+					task = t
+					break
+				}
+			}
+
+			if task == nil {
+				http.Error(w, "Task not found", http.StatusNotFound)
+				return
+			}
+
+			// Extract URLs from summary and notes
+			summary := str(firstOf(task, "summary", "description"))
+			notes := str(firstOf(task, "notes", "annotations"))
+
+			allText := summary + " " + notes
+			urls := extractURLs(allText)
+
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			tpl := template.Must(s.layoutTpl.Clone())
+			_, _ = tpl.New("content").Parse(`
+<h2>URLs in Task #{{.ID}}</h2>
+<p><strong>Summary:</strong> {{.Summary}}</p>
+{{if .URLs}}
+<ul>
+{{range .URLs}}
+  <li><a href="{{.}}" target="_blank" rel="noopener">{{.}}</a></li>
+{{end}}
+</ul>
+{{else}}
+<p>No URLs found in this task.</p>
+{{end}}
+<p><a href="/open?html=1">Back to tasks</a></p>
+`)
+
+			uname, _ := auth.UsernameFromRequest(r)
+			show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+			_ = tpl.Execute(w, map[string]any{
+				"ID":          id,
+				"Summary":     summary,
+				"URLs":        urls,
+				"Active":      activeFromPath(r.URL.Path),
+				"ShowCmdLog":  show,
+				"CmdEntries":  entries,
+				"MoreURL":     moreURL,
+				"CanShowMore": canMore,
+				"ReturnURL":   ret,
+			})
+			return
+		}
+
 		// Erwartet Pfad wie /tasks/123/start
 		id, action := parseTaskAction(r.URL.Path)
 		if id == "" || action == "" {
@@ -1258,6 +1583,29 @@ git push -u origin master</pre>`
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
+	})
+
+	// Undo last action
+	s.mux.HandleFunc("/undo", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		username, _ := auth.UsernameFromRequest(r)
+		res := s.runner.Run(username, 10*time.Second, "undo")
+		s.cmdStore.Append(username, "Undo last action", []string{"undo"})
+
+		if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
+			s.setFlash(w, "error", "Undo failed: "+res.Stderr)
+		} else {
+			s.setFlash(w, "success", "Last action undone")
+		}
+
+		referer := r.Header.Get("Referer")
+		if referer == "" {
+			referer = "/open?html=1"
+		}
+		http.Redirect(w, r, referer, http.StatusSeeOther)
 	})
 }
 

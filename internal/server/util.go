@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"net/url"
 	"regexp"
 	"sort"
@@ -236,6 +237,8 @@ func activeFromPath(path string) string {
 		return "version"
 	case strings.HasPrefix(path, "/sync"):
 		return "sync"
+	case strings.HasPrefix(path, "/undo"):
+		return "undo"
 	default:
 		return "home"
 	}
@@ -260,12 +263,73 @@ func normalizeTag(tag string) string {
 
 // summaryTokens zerlegt die Summary in Tokens und entfernt führende/nützliche '/'-Notentrenner,
 // damit nachfolgende Operatoren (+tag, project:) nicht als Note gewertet werden.
+// URLs werden als vollständige Tokens erhalten.
 func summaryTokens(summary string) []string {
 	s := strings.TrimSpace(summary)
-	// Entferne einzelne '/' Tokens am Anfang und mitten im Text
-	s = strings.ReplaceAll(s, "/", " ")
-	fields := strings.Fields(s)
-	return fields
+	if s == "" {
+		return nil
+	}
+
+	// URL-Regex (gleiches Pattern wie in extractURLs)
+	urlRe := regexp.MustCompile(`https?://[^\s<>"{}|\\^` + "`" + `\[\]]+`)
+
+	// Finde alle URLs und ihre Positionen
+	type urlMatch struct {
+		url        string
+		start, end int
+	}
+	var urls []urlMatch
+	for _, match := range urlRe.FindAllStringIndex(s, -1) {
+		urls = append(urls, urlMatch{
+			url:   s[match[0]:match[1]],
+			start: match[0],
+			end:   match[1],
+		})
+	}
+
+	// Ersetze URLs durch Platzhalter, um sie zu schützen
+	urlPlaceholders := make(map[string]string)
+	for i, url := range urls {
+		placeholder := fmt.Sprintf("__URL_PLACEHOLDER_%d__", i)
+		urlPlaceholders[placeholder] = url.url
+		// Ersetze URL durch Platzhalter (rückwärts, um Indizes nicht zu verschieben)
+	}
+
+	// Baue String mit Platzhaltern auf
+	result := strings.Builder{}
+	lastEnd := 0
+	for i, url := range urls {
+		// Text vor URL
+		if url.start > lastEnd {
+			result.WriteString(s[lastEnd:url.start])
+		}
+		// Platzhalter für URL
+		result.WriteString(fmt.Sprintf("__URL_PLACEHOLDER_%d__", i))
+		lastEnd = url.end
+	}
+	// Rest nach letzter URL
+	if lastEnd < len(s) {
+		result.WriteString(s[lastEnd:])
+	}
+	protected := result.String()
+
+	// Ersetze '/' durch Leerzeichen (nur außerhalb von URLs, die wir schon geschützt haben)
+	protected = strings.ReplaceAll(protected, "/", " ")
+
+	// Splitte in Tokens
+	fields := strings.Fields(protected)
+
+	// Ersetze Platzhalter wieder durch URLs
+	tokens := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if url, ok := urlPlaceholders[field]; ok {
+			tokens = append(tokens, url)
+		} else {
+			tokens = append(tokens, field)
+		}
+	}
+
+	return tokens
 }
 
 // trimQuotes entfernt führende und abschließende doppelte Anführungszeichen
@@ -788,4 +852,77 @@ func parseTemplatesFromOutput(raw string) []map[string]string {
 	}
 
 	return templates
+}
+
+// extractURLs extracts HTTP(S) URLs from a given text string
+func extractURLs(text string) []string {
+	urlRe := regexp.MustCompile(`https?://[^\s<>"{}|\\^` + "`" + `\[\]]+`)
+	matches := urlRe.FindAllString(text, -1)
+	urls := make([]string, 0, len(matches))
+	seen := make(map[string]bool)
+	for _, u := range matches {
+		u = strings.TrimRight(u, ".,;:!?)")
+		if !seen[u] {
+			urls = append(urls, u)
+			seen[u] = true
+		}
+	}
+	return urls
+}
+
+// linkifyURLs converts URLs in text to HTML anchor tags.
+// Returns html/template.HTML to prevent escaping of the HTML tags.
+func linkifyURLs(text string) template.HTML {
+	if text == "" {
+		return template.HTML("")
+	}
+
+	urlRe := regexp.MustCompile(`https?://[^\s<>"{}|\\^` + "`" + `\[\]]+`)
+
+	// Find all URL positions
+	type urlPos struct {
+		url   string
+		start int
+		end   int
+	}
+	var urls []urlPos
+	for _, match := range urlRe.FindAllStringIndex(text, -1) {
+		url := text[match[0]:match[1]]
+		// Trim trailing punctuation
+		url = strings.TrimRight(url, ".,;:!?)")
+		urls = append(urls, urlPos{
+			url:   url,
+			start: match[0],
+			end:   match[0] + len(url),
+		})
+	}
+
+	if len(urls) == 0 {
+		// No URLs found, escape and return as-is
+		return template.HTML(template.HTMLEscapeString(text))
+	}
+
+	// Build result with linkified URLs
+	var result strings.Builder
+	lastEnd := 0
+	for _, u := range urls {
+		// Add text before URL (escaped)
+		if u.start > lastEnd {
+			result.WriteString(template.HTMLEscapeString(text[lastEnd:u.start]))
+		}
+		// Add linkified URL
+		escapedURL := template.HTMLEscapeString(u.url)
+		result.WriteString(`<a href="`)
+		result.WriteString(escapedURL)
+		result.WriteString(`" target="_blank" rel="noopener">`)
+		result.WriteString(escapedURL)
+		result.WriteString(`</a>`)
+		lastEnd = u.end
+	}
+	// Add remaining text after last URL (escaped)
+	if lastEnd < len(text) {
+		result.WriteString(template.HTMLEscapeString(text[lastEnd:]))
+	}
+
+	return template.HTML(result.String())
 }

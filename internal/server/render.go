@@ -173,6 +173,9 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
 		mm["canStart"] = canStart
 		mm["canStop"] = canStop
 		mm["canDone"] = canDone
+		// Check for URLs in summary
+		summary := m["summary"]
+		mm["hasURLs"] = len(extractURLs(summary)) > 0
 		if due, ok := m["due"]; ok {
 			mm["overdue"] = isOverdue(due)
 		}
@@ -237,7 +240,7 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
       <td><input type="checkbox" name="ids" value="{{index . "id"}}" form="batchForm"/></td>
       <td>{{index . "id"}}</td>
       <td><span class="badge status {{index . "status"}}" title="{{index . "status"}}">{{index . "status"}}</span></td>
-      <td><pre style="margin:0;white-space:pre-wrap;">{{index . "summary"}}</pre></td>
+      <td style="white-space:pre-wrap;">{{linkifyURLs (index . "summary")}}</td>
       <td>{{index . "project"}}</td>
       <td><span class="badge prio {{index . "priority"}}" title="{{index . "priority"}}">{{index . "priority"}}</span></td>
       <td class="due {{if .overdue}}overdue{{end}}">{{index . "due"}}</td>
@@ -255,6 +258,7 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
          · <form method="post" action="/tasks/{{index . "id"}}/done" style="display:inline"><button type="submit" {{if not .canDone}}disabled{{end}}>done</button></form>
          · <form method="post" action="/tasks/{{index . "id"}}/stop" style="display:inline"><button type="submit" {{if not .canStop}}disabled{{end}}>stop</button></form>
          · <form method="post" action="/tasks/{{index . "id"}}/remove" style="display:inline"><button type="submit">remove</button></form>
+         {{if .hasURLs}} · <a href="/tasks/{{index . "id"}}/open">open</a>{{end}}
       </td>
     </tr>
   {{end}}
