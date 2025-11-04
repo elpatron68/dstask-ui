@@ -89,4 +89,71 @@ func TestGitCloneRemote_SetRemote_And_SetUpstream(t *testing.T) {
     }
 }
 
+func TestGitCloneRemote_NonEmptyDirFails(t *testing.T) {
+    t.Parallel()
+    tmp := t.TempDir()
+    // Set up non-empty ~/.dstask
+    home := filepath.Join(tmp, "home")
+    dst := filepath.Join(home, ".dstask")
+    if err := os.MkdirAll(dst, 0755); err != nil {
+        t.Fatal(err)
+    }
+    if err := os.WriteFile(filepath.Join(dst, "file.txt"), []byte("x"), 0644); err != nil {
+        t.Fatal(err)
+    }
+    // Prepare bare remote
+    remote := filepath.Join(tmp, "r.git")
+    runGit(t, tmp, nil, "init", "--bare", remote)
+
+    cfg := &config.Config{DstaskBin: "/bin/true", Repos: map[string]string{"u": home}}
+    r := NewRunner(cfg)
+    if err := r.GitCloneRemote("u", remote); err == nil {
+        t.Fatalf("expected clone to fail into non-empty dir")
+    }
+}
+
+func TestGitRemoteHeadBranch_DetectsMain(t *testing.T) {
+    t.Parallel()
+    tmp := t.TempDir()
+    // Create bare remote
+    remoteDir := filepath.Join(tmp, "remote.git")
+    runGit(t, tmp, nil, "init", "--bare", remoteDir)
+    // Seed remote with a main branch
+    seed := filepath.Join(tmp, "seed")
+    os.MkdirAll(seed, 0755)
+    runGit(t, seed, nil, "init")
+    runGit(t, seed, nil, "checkout", "-b", "main")
+    runGit(t, seed, nil, "config", "user.email", "test@example.com")
+    runGit(t, seed, nil, "config", "user.name", "Test User")
+    if err := os.WriteFile(filepath.Join(seed, "README.md"), []byte("seed"), 0644); err != nil { t.Fatal(err) }
+    runGit(t, seed, nil, "add", "README.md")
+    runGit(t, seed, nil, "commit", "-m", "seed")
+    runGit(t, seed, nil, "remote", "add", "origin", remoteDir)
+    runGit(t, seed, nil, "push", "-u", "origin", "main")
+
+    // Ensure bare remote HEAD points to main
+    runGit(t, remoteDir, nil, "symbolic-ref", "HEAD", "refs/heads/main")
+
+    // Now local repo representing ~/.dstask
+    home := filepath.Join(tmp, "home")
+    repo := filepath.Join(home, ".dstask")
+    os.MkdirAll(repo, 0755)
+    runGit(t, repo, nil, "init")
+    // create local main so branch exists
+    runGit(t, repo, nil, "checkout", "-b", "main")
+    runGit(t, repo, nil, "remote", "add", "origin", remoteDir)
+    // fetch so refs/remotes/origin/* exist
+    runGit(t, repo, nil, "fetch", "origin")
+
+    cfg := &config.Config{DstaskBin: "/bin/true", Repos: map[string]string{"u": home}}
+    r := NewRunner(cfg)
+    head, err := r.GitRemoteHeadBranch("u")
+    if err != nil {
+        t.Fatalf("GitRemoteHeadBranch err: %v", err)
+    }
+    if head != "main" {
+        t.Fatalf("expected main, got %s", head)
+    }
+}
+
 

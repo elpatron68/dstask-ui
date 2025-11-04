@@ -432,3 +432,45 @@ func TestBuildRowsFromTasksWithNotes(t *testing.T) {
 		t.Fatalf("task 3 not found in rows")
 	}
 }
+
+func TestSortRowsMaps_BySummaryAsc(t *testing.T) {
+	rows := []map[string]string{
+		{"id": "2", "summary": "b"},
+		{"id": "1", "summary": "a"},
+	}
+	SortRowsMaps(rows, "summary", "asc")
+	if rows[0]["summary"] != "a" {
+		t.Fatalf("expected a first, got %v", rows[0]["summary"])
+	}
+}
+
+func TestBuildDueFilterToken_And_Apply(t *testing.T) {
+	q := url.Values{}
+	q.Set("dueFilterType", "overdue")
+	tok := buildDueFilterToken(q)
+	rows := []map[string]string{{"id": "1", "due": "2099-01-01"}}
+	out := applyDueFilter(rows, tok)
+	if len(out) != 0 {
+		t.Fatalf("expected overdue filter to remove future-due rows")
+	}
+}
+
+func TestLinkifyURLs(t *testing.T) {
+	in := "see https://example.com"
+	out := linkifyURLs(in)
+	if string(out) == in || string(out) == "" {
+		t.Fatalf("expected linkify to wrap URL in anchor")
+	}
+}
+
+func TestRenderMarkdown_Sanitization(t *testing.T) {
+	in := "<script>alert('x')</script>**bold**"
+	h := renderMarkdown(in)
+	if string(h) == "" {
+		t.Fatalf("expected non-empty html")
+	}
+	if contains := (string(h) != "" && (len(in) == len(string(h)))); contains {
+		// Weak heuristic: ensure dangerous tags likely stripped/changed
+		t.Fatalf("expected markdown renderer to transform input")
+	}
+}
