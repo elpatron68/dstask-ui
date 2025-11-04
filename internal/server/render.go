@@ -21,7 +21,7 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
 <form method="get" style="margin-bottom:8px">
   <input type="hidden" name="html" value="1"/>
   <input name="q" value="{{.Q}}" placeholder="Filter: +tag project:foo text" style="width:60%" />
-  <button type="submit">Filter</button>
+  <button type="submit" title="Apply filter to task list">Filter</button>
 </form>
 <table border="1" cellpadding="4" cellspacing="0">
   <thead><tr>
@@ -40,10 +40,10 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
         <td>{{.Status}}</td>
         <td><pre style="margin:0;white-space:pre-wrap;">{{.Text}}</pre></td>
         <td>
-          <form method="post" action="/tasks/{{.ID}}/start" style="display:inline"><button type="submit">start</button></form>
-           · <form method="post" action="/tasks/{{.ID}}/done" style="display:inline"><button type="submit">done</button></form>
-           · <form method="post" action="/tasks/{{.ID}}/stop" style="display:inline"><button type="submit">stop</button></form>
-           · <form method="post" action="/tasks/{{.ID}}/remove" style="display:inline"><button type="submit">remove</button></form>
+          <form method="post" action="/tasks/{{.ID}}/start" style="display:inline"><button type="submit" title="Mark task as active">start</button></form>
+           · <form method="post" action="/tasks/{{.ID}}/done" style="display:inline"><button type="submit" title="Mark task as completed/resolved">done</button></form>
+           · <form method="post" action="/tasks/{{.ID}}/stop" style="display:inline"><button type="submit" title="Pause/stop the task">stop</button></form>
+           · <form method="post" action="/tasks/{{.ID}}/remove" style="display:inline"><button type="submit" title="Delete the task">remove</button></form>
         </td>
       </tr>
     {{else}}
@@ -217,7 +217,7 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
     </select>
     <input name="dueFilterDate" value="{{.DueFilterDate}}" placeholder="friday / 2025-12-31" style="width:180px; margin-left:4px;" {{if eq .DueFilterType "overdue"}}disabled{{end}} />
   </label>
-  <button type="submit" style="margin-left:8px;">Filtern</button>
+  <button type="submit" style="margin-left:8px;" title="Apply filters to task list">Filter</button>
 </form>
 <table border="1" cellpadding="4" cellspacing="0">
   <thead><tr>
@@ -254,12 +254,12 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
       <td><code>{{index . "resolved"}}</code></td>
       <td>{{index . "age"}}</td>
       <td>
-        <form method="get" action="/tasks/{{index . "id"}}/edit" style="display:inline"><button type="submit">edit</button></form>
-         · <form method="post" action="/tasks/{{index . "id"}}/start" style="display:inline"><button type="submit" {{if not .canStart}}disabled{{end}}>start</button></form>
-         · <form method="post" action="/tasks/{{index . "id"}}/done" style="display:inline"><button type="submit" {{if not .canDone}}disabled{{end}}>done</button></form>
-         · <form method="post" action="/tasks/{{index . "id"}}/stop" style="display:inline"><button type="submit" {{if not .canStop}}disabled{{end}}>stop</button></form>
-         · <form method="post" action="/tasks/{{index . "id"}}/remove" style="display:inline"><button type="submit">remove</button></form>
-         {{if .hasURLs}} · <a href="/tasks/{{index . "id"}}/open">open</a>{{end}}
+        <form method="get" action="/tasks/{{index . "id"}}/edit" style="display:inline"><button type="submit" title="Edit task details">edit</button></form>
+         · <form method="post" action="/tasks/{{index . "id"}}/start" style="display:inline"><button type="submit" {{if not .canStart}}disabled{{end}} title="Mark task as active">start</button></form>
+         · <form method="post" action="/tasks/{{index . "id"}}/done" style="display:inline"><button type="submit" {{if not .canDone}}disabled{{end}} title="Mark task as completed/resolved">done</button></form>
+         · <form method="post" action="/tasks/{{index . "id"}}/stop" style="display:inline"><button type="submit" {{if not .canStop}}disabled{{end}} title="Pause/stop the task">stop</button></form>
+         · <form method="post" action="/tasks/{{index . "id"}}/remove" style="display:inline"><button type="submit" title="Delete the task">remove</button></form>
+         {{if .hasURLs}} · <a href="/tasks/{{index . "id"}}/open" title="View and open URLs from this task">open</a>{{end}}
       </td>
     </tr>
   {{end}}
@@ -302,7 +302,7 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
   <span id="batchDueInput" style="margin-left:8px;display:none;">
     <label>Due: <input type="date" name="dueDate"/> or <input name="due" placeholder="e.g. friday / 2025-12-31"/></label>
   </span>
-  <button type="submit" style="margin-left:8px;">Apply</button>
+  <button type="submit" style="margin-left:8px;" title="Apply batch action to selected tasks">Apply</button>
 </form>
 <script>
 function updateBatchForm() {

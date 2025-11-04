@@ -86,10 +86,10 @@ table, th, td, table pre {font-size:13px}
   <a href="/version" class="{{if eq .Active "version"}}active{{end}}">Version</a>
   <a href="/help" class="{{if eq .Active "help"}}active{{end}}">Help</a>
   <form method="post" action="/undo" style="display:inline;margin-left:8px;">
-    <button type="submit" style="background:#f59e0b;color:#fff;border:none;padding:6px 10px;border-radius:4px;cursor:pointer;">Undo</button>
+    <button type="submit" style="background:#f59e0b;color:#fff;border:none;padding:6px 10px;border-radius:4px;cursor:pointer;" title="Revert the last action (git revert)">Undo</button>
   </form>
   <form method="post" action="/logout" style="display:inline;margin-left:8px;">
-    <button type="submit" style="background:#dc3545;color:#fff;border:none;padding:6px 10px;border-radius:4px;cursor:pointer;">Sign Out</button>
+    <button type="submit" style="background:#dc3545;color:#fff;border:none;padding:6px 10px;border-radius:4px;cursor:pointer;" title="Sign out of the application">Sign Out</button>
   </form>
 </nav>
 {{ template "content" . }}
@@ -245,7 +245,7 @@ func (s *Server) routes() {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		t := template.Must(s.layoutTpl.Clone())
 		_, _ = t.New("content").Parse(`<h1>dstask Web UI</h1><p>Signed in as: {{.User}}</p>
-<form method="post" action="/sync" style="margin-top:8px"><button type="submit">Sync</button></form>`) // placeholder
+<form method="post" action="/sync" style="margin-top:8px"><button type="submit" title="Sync tasks with git repository (pull then push)">Sync</button></form>`) // placeholder
 		username, _ := auth.UsernameFromRequest(r)
 		show, entries, moreURL, canMore, ret := s.footerData(r, username)
 		_ = t.Execute(w, map[string]any{
@@ -745,13 +745,13 @@ func (s *Server) routes() {
       <td>
         <form method="get" action="/tasks/new" style="display:inline">
           <input type="hidden" name="template" value="{{index . "id"}}" />
-          <button type="submit">use</button>
+          <button type="submit" title="Create a new task using this template">use</button>
         </form>
          · <form method="get" action="/templates/{{index . "id"}}/edit" style="display:inline">
-           <button type="submit">edit</button>
+           <button type="submit" title="Edit this template">edit</button>
          </form>
          · <form method="post" action="/templates/{{index . "id"}}/delete" style="display:inline" onsubmit="return confirm('Delete this template?');">
-           <button type="submit">delete</button>
+           <button type="submit" title="Delete this template">delete</button>
          </form>
       </td>
     </tr>
@@ -817,9 +817,9 @@ func (s *Server) routes() {
     <input name="due" placeholder="e.g. friday / 2025-12-31" />
   </div>
   <div style="margin-top:8px;">
-    <button type="submit">Create template</button>
+    <button type="submit" title="Create a new task template">Create template</button>
     <form method="get" action="/templates" style="display:inline;margin-left:8px;">
-      <button type="submit">cancel</button>
+      <button type="submit" title="Cancel and return to templates list">cancel</button>
     </form>
   </div>
  </form>
@@ -926,9 +926,9 @@ func (s *Server) routes() {
     <input name="due" value="{{.Due}}" placeholder="e.g. friday / 2025-12-31" />
   </div>
   <div style="margin-top:8px;">
-    <button type="submit">Update template</button>
+    <button type="submit" title="Save changes to template">Update template</button>
     <form method="get" action="/templates" style="display:inline;margin-left:8px;">
-      <button type="submit">cancel</button>
+      <button type="submit" title="Cancel editing and return to templates list">cancel</button>
     </form>
   </div>
 </form>
@@ -1088,8 +1088,8 @@ func (s *Server) routes() {
 <form method="post" action="/context">
   <div><label>New context (e.g. +work project:dstask): <input name="value"></label></div>
   <div>
-    <button type="submit">Apply</button>
-    <button type="submit" name="clear" value="1">Clear</button>
+    <button type="submit" title="Apply new context filter">Apply</button>
+    <button type="submit" name="clear" value="1" title="Clear context filter">Clear</button>
   </div>
 </form>`)
 			uname, _ := auth.UsernameFromRequest(r)
@@ -1191,7 +1191,7 @@ func (s *Server) routes() {
       {{range .Templates}}<option value="{{index . "id"}}" {{if eq $.SelectedTemplate (index . "id")}}selected{{end}}>#{{index . "id"}}: {{index . "summary"}}</option>{{end}}
     </select>
   </div>
-  <div style="margin-top:8px;"><button type="submit">Create</button></div>
+  <div style="margin-top:8px;"><button type="submit" title="Create a new task">Create</button></div>
  </form>
         `)
 		uname, _ := auth.UsernameFromRequest(r)
@@ -1296,28 +1296,56 @@ func (s *Server) routes() {
 				return
 			}
 			username, _ := auth.UsernameFromRequest(r)
-			res := s.runner.Run(username, 5*time.Second, "export")
-
-			if res.Err != nil || res.ExitCode != 0 {
-				http.Error(w, "Failed to fetch tasks", http.StatusBadGateway)
-				return
-			}
-
-			tasks, ok := decodeTasksJSONFlexible(res.Stdout)
-			if !ok {
-				http.Error(w, "Failed to parse tasks", http.StatusInternalServerError)
-				return
-			}
 
 			var task map[string]any
-			for _, t := range tasks {
-				if str(firstOf(t, "id", "ID")) == id {
-					task = t
-					break
+
+			// Try export first (gets all non-resolved tasks)
+			res := s.runner.Run(username, 5*time.Second, "export")
+			if res.Err == nil && res.ExitCode == 0 && !res.TimedOut {
+				if tasks, ok := decodeTasksJSONFlexible(res.Stdout); ok {
+					for _, t := range tasks {
+						taskID := str(firstOf(t, "id", "ID", "Id", "uuid", "UUID"))
+						if taskID == id {
+							task = t
+							break
+						}
+					}
+				}
+			}
+
+			// Fallback 1: try dstask <id> directly (shows single task details, works for any status)
+			if task == nil {
+				showRes := s.runner.Run(username, 5*time.Second, id)
+				if showRes.Err == nil && showRes.ExitCode == 0 && !showRes.TimedOut {
+					if tasks, ok := decodeTasksJSONFlexible(showRes.Stdout); ok && len(tasks) > 0 {
+						task = tasks[0]
+					} else {
+						// If JSON parsing fails, log for debugging
+						applog.Warnf("task %s: JSON parse failed from 'dstask %s', stdout=%q", id, id, truncate(showRes.Stdout, 200))
+					}
+				} else {
+					applog.Warnf("task %s: 'dstask %s' failed, code=%d err=%v stderr=%q", id, id, showRes.ExitCode, showRes.Err, truncate(showRes.Stderr, 200))
+				}
+			}
+
+			// Fallback 2: try show-resolved in case task is resolved and not in export
+			if task == nil {
+				resolvedRes := s.runner.Run(username, 5*time.Second, "show-resolved")
+				if resolvedRes.Err == nil && resolvedRes.ExitCode == 0 && !resolvedRes.TimedOut {
+					if tasks, ok := decodeTasksJSONFlexible(resolvedRes.Stdout); ok {
+						for _, t := range tasks {
+							taskID := str(firstOf(t, "id", "ID", "Id", "uuid", "UUID"))
+							if taskID == id {
+								task = t
+								break
+							}
+						}
+					}
 				}
 			}
 
 			if task == nil {
+				applog.Warnf("task %s: not found in export, 'dstask %s', or show-resolved", id, id)
 				http.Error(w, "Task not found", http.StatusNotFound)
 				return
 			}
@@ -1411,10 +1439,10 @@ func (s *Server) routes() {
     <input name="due" value="{{.Due}}" placeholder="e.g. friday / 2025-12-31" />
   </div>
   <div style="margin-top:8px;">
-    <button type="submit">Update task</button>
+    <button type="submit" title="Save changes to task">Update task</button>
     <form method="get" action="/open" style="display:inline;margin-left:8px;">
       <input type="hidden" name="html" value="1" />
-      <button type="submit">cancel</button>
+      <button type="submit" title="Cancel editing and return to task list">cancel</button>
     </form>
   </div>
 </form>
@@ -1539,28 +1567,56 @@ func (s *Server) routes() {
 				return
 			}
 			username, _ := auth.UsernameFromRequest(r)
-			res := s.runner.Run(username, 5*time.Second, "export")
-
-			if res.Err != nil || res.ExitCode != 0 {
-				http.Error(w, "Failed to fetch task", http.StatusBadGateway)
-				return
-			}
-
-			tasks, ok := decodeTasksJSONFlexible(res.Stdout)
-			if !ok {
-				http.Error(w, "Failed to parse tasks", http.StatusInternalServerError)
-				return
-			}
 
 			var task map[string]any
-			for _, t := range tasks {
-				if str(firstOf(t, "id", "ID")) == id {
-					task = t
-					break
+
+			// Try export first (gets all non-resolved tasks)
+			res := s.runner.Run(username, 5*time.Second, "export")
+			if res.Err == nil && res.ExitCode == 0 && !res.TimedOut {
+				if tasks, ok := decodeTasksJSONFlexible(res.Stdout); ok {
+					for _, t := range tasks {
+						taskID := str(firstOf(t, "id", "ID", "Id", "uuid", "UUID"))
+						if taskID == id {
+							task = t
+							break
+						}
+					}
+				}
+			}
+
+			// Fallback 1: try dstask <id> directly (shows single task details, works for any status)
+			if task == nil {
+				showRes := s.runner.Run(username, 5*time.Second, id)
+				if showRes.Err == nil && showRes.ExitCode == 0 && !showRes.TimedOut {
+					if tasks, ok := decodeTasksJSONFlexible(showRes.Stdout); ok && len(tasks) > 0 {
+						task = tasks[0]
+					} else {
+						// If JSON parsing fails, log for debugging
+						applog.Warnf("task %s: JSON parse failed from 'dstask %s', stdout=%q", id, id, truncate(showRes.Stdout, 200))
+					}
+				} else {
+					applog.Warnf("task %s: 'dstask %s' failed, code=%d err=%v stderr=%q", id, id, showRes.ExitCode, showRes.Err, truncate(showRes.Stderr, 200))
+				}
+			}
+
+			// Fallback 2: try show-resolved in case task is resolved and not in export
+			if task == nil {
+				resolvedRes := s.runner.Run(username, 5*time.Second, "show-resolved")
+				if resolvedRes.Err == nil && resolvedRes.ExitCode == 0 && !resolvedRes.TimedOut {
+					if tasks, ok := decodeTasksJSONFlexible(resolvedRes.Stdout); ok {
+						for _, t := range tasks {
+							taskID := str(firstOf(t, "id", "ID", "Id", "uuid", "UUID"))
+							if taskID == id {
+								task = t
+								break
+							}
+						}
+					}
 				}
 			}
 
 			if task == nil {
+				applog.Warnf("task %s: not found in export, 'dstask %s', or show-resolved", id, id)
 				http.Error(w, "Task not found", http.StatusNotFound)
 				return
 			}
@@ -1676,7 +1732,7 @@ func (s *Server) routes() {
     </select>
   </label></div>
   <div><label>Note (for action "note"):<br><textarea name="note" rows="3" cols="40"></textarea></label></div>
-  <div><button type="submit">Execute</button></div>
+  <div><button type="submit" title="Execute the selected action on the task">Execute</button></div>
 </form>`)
 			uname, _ := auth.UsernameFromRequest(r)
 			show, entries, moreURL, canMore, ret := s.footerData(r, uname)
@@ -1845,7 +1901,7 @@ func (s *Server) routes() {
 			t := template.Must(s.layoutTpl.Clone())
 			_, _ = t.New("content").Parse(`<h2>Sync</h2>
 <p>Runs <code>dstask sync</code> (pull, merge, push). The underlying repo must have a remote with an upstream branch.</p>
-<form method="post" action="/sync"><button type="submit">Sync now</button></form>`)
+<form method="post" action="/sync"><button type="submit" title="Sync tasks with git repository (pull, merge, push)">Sync now</button></form>`)
 			_ = t.Execute(w, nil)
 		case http.MethodPost:
 			username, _ := auth.UsernameFromRequest(r)

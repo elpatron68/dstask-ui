@@ -343,6 +343,14 @@ func trimQuotes(s string) string {
 	return s
 }
 
+// truncate truncates a string to max length, appending "..." if truncated
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
+}
+
 // sort helpers
 func priorityRank(p string) int {
 	switch strings.ToUpper(p) {
