@@ -54,6 +54,27 @@ func TestLoadEnvOverrides(t *testing.T) {
 }
 
 func TestLoadFromFileAndResolveHome(t *testing.T) {
+	// Save and clear environment variables that might override file values
+	// We need to unset them, not just set them to empty strings
+	envVars := []string{"DSTWEB_DSTASK_BIN", "DSTWEB_LISTEN", "DSTWEB_LOG_LEVEL", "DSTWEB_UI_SHOW_CMDLOG", "DSTWEB_CMDLOG_MAX"}
+	saved := make(map[string]string)
+	for _, key := range envVars {
+		if val, ok := os.LookupEnv(key); ok {
+			saved[key] = val
+		}
+		os.Unsetenv(key)
+	}
+	// Restore environment variables after test
+	defer func() {
+		for _, key := range envVars {
+			if val, ok := saved[key]; ok {
+				os.Setenv(key, val)
+			} else {
+				os.Unsetenv(key)
+			}
+		}
+	}()
+	
 	dir := t.TempDir()
 	yaml := []byte("dstaskBin: 'D:/dstask.exe'\nlisten: '127.0.0.1:9000'\nrepos:\n  alice: 'C:/Users/alice/.dstask'\nlogging:\n  level: 'warn'\nui:\n  showCommandLog: false\n  commandLogMax: 12\n")
 	path := filepath.Join(dir, "config.yaml")
