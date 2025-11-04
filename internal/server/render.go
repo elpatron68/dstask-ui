@@ -177,6 +177,9 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
 		// Check for URLs in summary
 		summary := m["summary"]
 		mm["hasURLs"] = len(extractURLs(summary)) > 0
+		// Check for notes
+		notes := m["notes"]
+		mm["hasNotes"] = notes != "" && strings.TrimSpace(notes) != ""
 		if due, ok := m["due"]; ok {
 			mm["overdue"] = isOverdue(due)
 		}
@@ -239,7 +242,7 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
   {{range .Rows}}
     <tr>
       <td><input type="checkbox" name="ids" value="{{index . "id"}}" form="batchForm"/></td>
-      <td>{{index . "id"}}</td>
+      <td>{{index . "id"}}{{if .hasNotes}} <span title="This task has notes">📝</span>{{end}}</td>
       <td><span class="badge status {{index . "status"}}" title="{{index . "status"}}">{{index . "status"}}</span></td>
       <td style="white-space:pre-wrap;">{{linkifyURLs (index . "summary")}}</td>
       <td>{{index . "project"}}</td>

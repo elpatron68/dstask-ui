@@ -220,6 +220,8 @@ func (s *Server) routes() {
 				if tasks, ok := decodeTasksJSONFlexible(exp.Stdout); ok && len(tasks) > 0 {
 					rows := buildRowsFromTasks(tasks, "")
 					rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
+					dueFilter := buildDueFilterToken(r.URL.Query())
+					rows = applyDueFilter(rows, dueFilter)
 					if len(rows) > 0 {
 						w.Header().Set("Content-Type", "text/html; charset=utf-8")
 						s.renderExportTable(w, r, "Next", rows)
@@ -236,6 +238,8 @@ func (s *Server) routes() {
 			if tasks2, ok := decodeTasksJSONFlexible(res.Stdout); ok && len(tasks2) > 0 {
 				rows := buildRowsFromTasks(tasks2, "")
 				rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
+				dueFilter := buildDueFilterToken(r.URL.Query())
+				rows = applyDueFilter(rows, dueFilter)
 				if len(rows) > 0 {
 					w.Header().Set("Content-Type", "text/html; charset=utf-8")
 					s.renderExportTable(w, r, "Next", rows)
@@ -281,6 +285,7 @@ func (s *Server) routes() {
 							"resolved": trimQuotes(str(firstOf(t, "resolved", "Resolved"))),
 							"age":      ageInDays(trimQuotes(str(firstOf(t, "created", "Created")))),
 							"tags":     joinTags(firstOf(t, "tags", "Tags")),
+							"notes":    trimQuotes(str(firstOf(t, "notes", "annotations", "note"))),
 						})
 					}
 					dueFilter := buildDueFilterToken(r.URL.Query())
@@ -375,6 +380,8 @@ func (s *Server) routes() {
 				if tasks, ok := decodeTasksJSONFlexible(exp.Stdout); ok && len(tasks) > 0 {
 					rows := buildRowsFromTasks(tasks, "active")
 					rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
+					dueFilter := buildDueFilterToken(r.URL.Query())
+					rows = applyDueFilter(rows, dueFilter)
 					if len(rows) > 0 {
 						w.Header().Set("Content-Type", "text/html; charset=utf-8")
 						s.renderExportTable(w, r, "Active", rows)
@@ -391,6 +398,8 @@ func (s *Server) routes() {
 			if tasks2, ok := decodeTasksJSONFlexible(res.Stdout); ok && len(tasks2) > 0 {
 				rows := buildRowsFromTasks(tasks2, "active")
 				rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
+				dueFilter := buildDueFilterToken(r.URL.Query())
+				rows = applyDueFilter(rows, dueFilter)
 				if len(rows) > 0 {
 					w.Header().Set("Content-Type", "text/html; charset=utf-8")
 					s.renderExportTable(w, r, "Active", rows)
@@ -419,6 +428,8 @@ func (s *Server) routes() {
 				if tasks, ok := decodeTasksJSON(exp.Stdout); ok && len(tasks) > 0 {
 					rows := buildRowsFromTasks(tasks, "paused")
 					rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
+					dueFilter := buildDueFilterToken(r.URL.Query())
+					rows = applyDueFilter(rows, dueFilter)
 					if len(rows) > 0 {
 						w.Header().Set("Content-Type", "text/html; charset=utf-8")
 						s.renderExportTable(w, r, "Paused", rows)
@@ -435,6 +446,8 @@ func (s *Server) routes() {
 			if tasks2, ok := decodeTasksJSONFlexible(res.Stdout); ok && len(tasks2) > 0 {
 				rows := buildRowsFromTasks(tasks2, "paused")
 				rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
+				dueFilter := buildDueFilterToken(r.URL.Query())
+				rows = applyDueFilter(rows, dueFilter)
 				if len(rows) > 0 {
 					w.Header().Set("Content-Type", "text/html; charset=utf-8")
 					s.renderExportTable(w, r, "Paused", rows)
@@ -1389,6 +1402,7 @@ func (s *Server) routes() {
 			project := trimQuotes(str(firstOf(task, "project", "Project")))
 			priority := str(firstOf(task, "priority", "Priority"))
 			dueValue := trimQuotes(str(firstOf(task, "due", "Due", "dueDate", "DueDate")))
+			notes := trimQuotes(str(firstOf(task, "notes", "annotations", "note")))
 
 			// Parse existing tags from task
 			existingTags := make(map[string]bool)
@@ -1430,6 +1444,7 @@ func (s *Server) routes() {
 			_, _ = t.New("content").Parse(`
 <h2>Edit task #{{.TaskID}}</h2>
 <form method="post" action="/tasks/{{.TaskID}}/edit">
+  <input type="hidden" name="return_to" value="{{.Referer}}"/>
   <div><label>Summary: <input name="summary" value="{{.Summary}}" required style="width:60%"></label></div>
   <div>
     <label>Project:</label>
@@ -1471,6 +1486,11 @@ func (s *Server) routes() {
     <span style="margin:0 8px;">or</span>
     <input name="due" value="{{.Due}}" placeholder="e.g. friday / 2025-12-31" />
   </div>
+  <div>
+    <label>Notes (markdown supported):
+      <textarea name="notes" rows="10" style="width:100%;font-family:monospace;">{{.Notes}}</textarea>
+    </label>
+  </div>
   <div style="margin-top:8px;">
     <button type="submit" title="Save changes to task">Update task</button>
     <button type="button" onclick="window.location.href='{{.Referer}}'; return false;" style="margin-left:8px;" title="Cancel editing and return to previous page">cancel</button>
@@ -1494,6 +1514,7 @@ func (s *Server) routes() {
 				"HasProjectInSelect": hasProjectInSelect,
 				"DueDate":            dueDateValue,
 				"Due":                dueValue,
+				"Notes":              notes,
 				"Projects":           projects,
 				"Tags":               tags,
 				"ExistingTags":       existingTags,
@@ -1537,6 +1558,7 @@ func (s *Server) routes() {
 			if dueDate != "" {
 				due = dueDate
 			}
+			notes := r.FormValue("notes") // Don't trim - preserve newlines
 
 			// Build modify args: dstask <id> modify <summary> project: priority due: +tags
 			args := []string{id, "modify"}
@@ -1597,13 +1619,35 @@ func (s *Server) routes() {
 				http.Redirect(w, r, "/tasks/"+id+"/edit", http.StatusSeeOther)
 				return
 			}
-			s.setFlash(w, "success", "Task updated successfully")
-			// Redirect to referer if available, otherwise to /open
-			referer := r.Header.Get("Referer")
-			if referer == "" {
-				referer = "/open?html=1"
+			// Update notes if provided
+			notesUpdateSuccess := true
+			if strings.TrimSpace(notes) != "" {
+				applog.Infof("attempting to update notes for task %s, notes length: %d, first 100 chars: %q", id, len(notes), truncate(notes, 100))
+
+				// Use direct YAML file editing method (most reliable for multi-line notes)
+				if err := s.runner.UpdateTaskNotesDirectly(username, id, notes); err != nil {
+					applog.Warnf("task note update failed: %v", err)
+					notesUpdateSuccess = false
+				} else {
+					s.cmdStore.Append(username, "Edit task notes", []string{"note", id})
+					applog.Infof("task note update succeeded (notes saved directly to YAML file)")
+				}
 			}
-			http.Redirect(w, r, referer, http.StatusSeeOther)
+			if notesUpdateSuccess {
+				s.setFlash(w, "success", "Task updated successfully")
+			} else {
+				s.setFlash(w, "warning", "Task updated, but notes update may have failed. Check the task to verify.")
+			}
+			// Redirect to return_to from form if available, otherwise try referer, otherwise /open
+			returnTo := strings.TrimSpace(r.FormValue("return_to"))
+			if returnTo == "" {
+				returnTo = r.Header.Get("Referer")
+			}
+			// If return_to points to the edit page itself, redirect to /open instead
+			if returnTo == "" || strings.Contains(returnTo, "/tasks/"+id+"/edit") {
+				returnTo = "/open?html=1"
+			}
+			http.Redirect(w, r, returnTo, http.StatusSeeOther)
 			return
 		}
 

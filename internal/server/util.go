@@ -152,6 +152,7 @@ func buildRowsFromTasks(tasks []map[string]any, statusFilter string) []map[strin
 		}
 		created := trimQuotes(str(firstOf(t, "created", "Created")))
 		resolved := trimQuotes(str(firstOf(t, "resolved", "Resolved")))
+		notes := trimQuotes(str(firstOf(t, "notes", "annotations", "note")))
 		rows = append(rows, map[string]string{
 			"id":       id,
 			"status":   st,
@@ -160,6 +161,7 @@ func buildRowsFromTasks(tasks []map[string]any, statusFilter string) []map[strin
 			"priority": str(firstOf(t, "priority")),
 			"due":      trimQuotes(str(firstOf(t, "due", "dueDate"))),
 			"tags":     joinTags(firstOf(t, "tags")),
+			"notes":    notes,
 			"created":  created,
 			"resolved": resolved,
 			"age":      ageInDays(created),

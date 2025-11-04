@@ -16,7 +16,14 @@ func main() {
 	password := getenvDefault("DSTWEB_PASS", "admin")
 
 	// Config laden (optional config.yaml)
-	cfg, err := config.Load("")
+	// Versuche zuerst im aktuellen Verzeichnis, dann im Root-Verzeichnis (zwei Ebenen nach oben)
+	configPath := ""
+	if _, err := os.Stat("config.yaml"); err == nil {
+		configPath = "config.yaml"
+	} else if _, err := os.Stat("../../config.yaml"); err == nil {
+		configPath = "../../config.yaml"
+	}
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		stdlog.Fatalf("config error: %v", err)
 	}

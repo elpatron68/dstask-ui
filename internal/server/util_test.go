@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -291,5 +292,143 @@ func TestValidateCSRFToken(t *testing.T) {
 	valid5 := validateCSRFToken(req5, token)
 	if valid5 {
 		t.Errorf("validateCSRFToken() with empty cookie value should return false")
+	}
+}
+
+func TestBuildDueFilterToken(t *testing.T) {
+	// Test empty query
+	q := url.Values{}
+	token := buildDueFilterToken(q)
+	if token != "" {
+		t.Fatalf("expected empty token for empty query, got %q", token)
+	}
+
+	// Test overdue filter
+	q = url.Values{}
+	q.Set("dueFilterType", "overdue")
+	token = buildDueFilterToken(q)
+	if token != "due:overdue" {
+		t.Fatalf("expected 'due:overdue', got %q", token)
+	}
+
+	// Test before filter
+	q = url.Values{}
+	q.Set("dueFilterType", "before")
+	q.Set("dueFilterDate", "2025-12-31")
+	token = buildDueFilterToken(q)
+	expected := "due.before:2025-12-31"
+	if token != expected {
+		t.Fatalf("expected %q, got %q", expected, token)
+	}
+
+	// Test after filter
+	q = url.Values{}
+	q.Set("dueFilterType", "after")
+	q.Set("dueFilterDate", "tomorrow")
+	token = buildDueFilterToken(q)
+	expected = "due.after:tomorrow"
+	if token != expected {
+		t.Fatalf("expected %q, got %q", expected, token)
+	}
+
+	// Test on filter
+	q = url.Values{}
+	q.Set("dueFilterType", "on")
+	q.Set("dueFilterDate", "friday")
+	token = buildDueFilterToken(q)
+	expected = "due.on:friday"
+	if token != expected {
+		t.Fatalf("expected %q, got %q", expected, token)
+	}
+
+	// Test filter type without date (should return empty)
+	q = url.Values{}
+	q.Set("dueFilterType", "before")
+	token = buildDueFilterToken(q)
+	if token != "" {
+		t.Fatalf("expected empty token when filterDate is missing, got %q", token)
+	}
+}
+
+func TestBuildRowsFromTasksWithNotes(t *testing.T) {
+	// Test that notes are extracted correctly
+	tasks := []map[string]any{
+		{
+			"id":      "1",
+			"status":  "active",
+			"summary": "Test task",
+			"notes":   "This is a note\nwith multiple lines",
+		},
+		{
+			"id":      "2",
+			"status":  "pending",
+			"summary": "Another task",
+			"notes":   "",
+		},
+		{
+			"id":          "3",
+			"status":      "active",
+			"summary":     "Task with annotations",
+			"annotations": "Some annotations",
+		},
+		{
+			"id":      "4",
+			"status":  "pending",
+			"summary": "Task without notes",
+		},
+	}
+
+	rows := buildRowsFromTasks(tasks, "")
+	if len(rows) != 4 { // All tasks should be included (resolved are filtered out, but we have no resolved tasks)
+		t.Fatalf("expected 4 rows, got %d", len(rows))
+	}
+
+	// Check task 1 has notes
+	found := false
+	for _, r := range rows {
+		if r["id"] == "1" {
+			found = true
+			notes := r["notes"]
+			expected := "This is a note\nwith multiple lines"
+			if notes != expected {
+				t.Fatalf("expected notes %q, got %q", expected, notes)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("task 1 not found in rows")
+	}
+
+	// Check task 2 has empty notes
+	found = false
+	for _, r := range rows {
+		if r["id"] == "2" {
+			found = true
+			notes := r["notes"]
+			if notes != "" {
+				t.Fatalf("expected empty notes, got %q", notes)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("task 2 not found in rows")
+	}
+
+	// Check task 3 uses "annotations" field
+	found = false
+	for _, r := range rows {
+		if r["id"] == "3" {
+			found = true
+			notes := r["notes"]
+			if notes != "Some annotations" {
+				t.Fatalf("expected 'Some annotations', got %q", notes)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("task 3 not found in rows")
 	}
 }
