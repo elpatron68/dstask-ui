@@ -96,7 +96,7 @@ table, th, td, table pre {font-size:13px}
 .notes-content table th{background:#f6f8fa;font-weight:600}
 .hovercard{display:inline-block;position:relative}
 .hovercard .label{cursor:help;padding:0 2px}
-.hovercard .card{display:none;position:absolute;top:1.2em;right:0;z-index:9999;background:#fff;border:1px solid #d0d7de;box-shadow:0 8px 24px rgba(140,149,159,0.2);border-radius:6px;max-width:50vw;width:420px;max-height:50vh;overflow:auto;padding:8px}
+.hovercard .card{display:none;position:absolute;top:1.2em;left:0;z-index:9999;background:#fff;border:1px solid #d0d7de;box-shadow:0 8px 24px rgba(140,149,159,0.2);border-radius:6px;max-width:min(90vw,520px);max-height:50vh;overflow:auto;padding:8px}
 .hovercard:hover .card{display:block}
 </style>
 </head><body>
