@@ -78,6 +78,7 @@ table, th, td, table pre {font-size:13px}
   <a href="/resolved?html=1" class="{{if eq .Active "resolved"}}active{{end}}">Resolved</a>
   <a href="/tags" class="{{if eq .Active "tags"}}active{{end}}">Tags</a>
   <a href="/projects" class="{{if eq .Active "projects"}}active{{end}}">Projects</a>
+  <a href="/templates" class="{{if eq .Active "templates"}}active{{end}}">Templates</a>
   <a href="/context" class="{{if eq .Active "context"}}active{{end}}">Context</a>
   <a href="/tasks/new" class="{{if eq .Active "new"}}active{{end}}">New task</a>
   <a href="/tasks/action" class="{{if eq .Active "action"}}active{{end}}">Actions</a>
@@ -271,6 +272,8 @@ func (s *Server) routes() {
 							"tags":     joinTags(firstOf(t, "tags", "Tags")),
 						})
 					}
+					dueFilter := buildDueFilterToken(r.URL.Query())
+					rows = applyDueFilter(rows, dueFilter)
 					if len(rows) > 0 {
 						w.Header().Set("Content-Type", "text/html; charset=utf-8")
 						s.renderExportTable(w, r, "Open", rows)
@@ -279,6 +282,9 @@ func (s *Server) routes() {
 				} else {
 					// Loose Parser über den Rohtext
 					rows := parseTasksLooseFromJSONText(exp.Stdout)
+					rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
+					dueFilter := buildDueFilterToken(r.URL.Query())
+					rows = applyDueFilter(rows, dueFilter)
 					if len(rows) > 0 {
 						w.Header().Set("Content-Type", "text/html; charset=utf-8")
 						s.renderExportTable(w, r, "Open", rows)
@@ -313,6 +319,9 @@ func (s *Server) routes() {
 						"tags":     joinTags(firstOf(t, "tags")),
 					})
 				}
+				rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
+				dueFilter := buildDueFilterToken(r.URL.Query())
+				rows = applyDueFilter(rows, dueFilter)
 				if len(rows) > 0 {
 					w.Header().Set("Content-Type", "text/html; charset=utf-8")
 					s.renderExportTable(w, r, "Open", rows)
@@ -320,6 +329,9 @@ func (s *Server) routes() {
 				}
 			}
 			rows := parseOpenPlain(res.Stdout)
+			rows = applyQueryFilter(rows, r.URL.Query().Get("q"))
+			dueFilter := buildDueFilterToken(r.URL.Query())
+			rows = applyDueFilter(rows, dueFilter)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			if len(rows) > 0 {
 				s.renderExportTable(w, r, "Open", rows)
@@ -568,6 +580,196 @@ func (s *Server) routes() {
 		_, _ = w.Write([]byte(out))
 	})
 
+	// Templates anzeigen
+	s.mux.HandleFunc("/templates", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			// POST: Template erstellen
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "invalid form", http.StatusBadRequest)
+				return
+			}
+			summary := strings.TrimSpace(r.FormValue("summary"))
+			if summary == "" {
+				http.Error(w, "summary required", http.StatusBadRequest)
+				return
+			}
+			username, _ := auth.UsernameFromRequest(r)
+			tags := strings.TrimSpace(r.FormValue("tags"))
+			project := strings.TrimSpace(r.FormValue("project"))
+			// Prefer selected existing project if provided
+			if ps := strings.TrimSpace(r.FormValue("projectSelect")); ps != "" {
+				project = ps
+			}
+			// Due: prefer date picker if present
+			dueDate := strings.TrimSpace(r.FormValue("dueDate"))
+			due := strings.TrimSpace(r.FormValue("due"))
+			if dueDate != "" {
+				due = dueDate
+			}
+
+			// Compose args per dstask template Syntax: template <summary tokens...> +tags project: due:
+			args := []string{"template"}
+			args = append(args, summaryTokens(summary)...)
+			// Collect tags from existing checkboxes
+			for _, t := range r.Form["tagsExisting"] {
+				t = strings.TrimSpace(t)
+				if t == "" {
+					continue
+				}
+				t = normalizeTag(t)
+				if !strings.HasPrefix(t, "+") {
+					args = append(args, "+"+t)
+				} else {
+					args = append(args, t)
+				}
+			}
+			if tags != "" {
+				for _, t := range strings.Split(tags, ",") {
+					t = strings.TrimSpace(t)
+					if t == "" {
+						continue
+					}
+					t = normalizeTag(t)
+					if !strings.HasPrefix(t, "+") {
+						args = append(args, "+"+t)
+					} else {
+						args = append(args, t)
+					}
+				}
+			}
+			if project != "" {
+				args = append(args, "project:"+project)
+			}
+			if due != "" {
+				args = append(args, "due:"+quoteIfNeeded(due))
+			}
+
+			res := s.runner.Run(username, 10_000_000_000, args...) // 10s
+			s.cmdStore.Append(username, "Create template", args)
+			if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
+				applog.Warnf("template creation failed: code=%d timeout=%v err=%v", res.ExitCode, res.TimedOut, res.Err)
+				s.setFlash(w, "error", "Template creation failed: "+res.Stderr)
+				http.Redirect(w, r, "/templates/new", http.StatusSeeOther)
+				return
+			}
+			applog.Infof("template created successfully")
+			s.setFlash(w, "success", "Template created successfully")
+			http.Redirect(w, r, "/templates", http.StatusSeeOther)
+			return
+		}
+
+		// GET: Templates anzeigen
+		username, _ := auth.UsernameFromRequest(r)
+		res := s.runner.Run(username, 5_000_000_000, "show-templates")
+		s.cmdStore.Append(username, "List templates", []string{"show-templates"})
+		if res.Err != nil && !res.TimedOut {
+			http.Error(w, res.Stderr, http.StatusBadGateway)
+			return
+		}
+		templates := parseTemplatesFromOutput(res.Stdout)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		t := template.Must(s.layoutTpl.Clone())
+		_, _ = t.New("content").Parse(`
+<h2>Templates <a href="/templates/new" style="font-size:14px;font-weight:normal;margin-left:8px;">(New template)</a></h2>
+{{if .Templates}}
+<table border="1" cellpadding="4" cellspacing="0">
+  <thead><tr>
+    <th style="width:64px;">ID</th>
+    <th>Summary</th>
+    <th>Project</th>
+    <th>Tags</th>
+    <th style="width:160px;">Actions</th>
+  </tr></thead>
+  <tbody>
+  {{range .Templates}}
+    <tr>
+      <td>{{index . "id"}}</td>
+      <td><pre style="margin:0;white-space:pre-wrap;">{{index . "summary"}}</pre></td>
+      <td>{{index . "project"}}</td>
+      <td>{{index . "tags"}}</td>
+      <td><a href="/tasks/new?template={{index . "id"}}">Use template</a></td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+{{else}}
+<p>No templates found.</p>
+{{end}}
+`)
+		uname, _ := auth.UsernameFromRequest(r)
+		show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+		_ = t.Execute(w, map[string]any{
+			"Templates":   templates,
+			"Active":      activeFromPath(r.URL.Path),
+			"Flash":       s.getFlash(r),
+			"ShowCmdLog":  show,
+			"CmdEntries":  entries,
+			"MoreURL":     moreURL,
+			"CanShowMore": canMore,
+			"ReturnURL":   ret,
+		})
+	})
+
+	// Template erstellen (Form)
+	s.mux.HandleFunc("/templates/new", func(w http.ResponseWriter, r *http.Request) {
+		username, _ := auth.UsernameFromRequest(r)
+		// Fetch existing projects and tags
+		projRes := s.runner.Run(username, 5_000_000_000, "show-projects")
+		tagRes := s.runner.Run(username, 5_000_000_000, "show-tags")
+		projects := parseProjectsFromOutput(projRes.Stdout)
+		tags := parseTagsFromOutput(tagRes.Stdout)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		t := template.Must(s.layoutTpl.Clone())
+		_, _ = t.New("content").Parse(`
+<h2>New template</h2>
+<form method="post" action="/templates">
+  <div><label>Summary: <input name="summary" required style="width:60%"></label></div>
+  <div>
+    <label>Project:</label>
+    <select name="projectSelect">
+      <option value="">(none)</option>
+      {{range .Projects}}<option value="{{.}}">{{.}}</option>{{end}}
+    </select>
+    <span style="margin:0 8px;">or</span>
+    <input name="project" placeholder="new project" />
+  </div>
+  <div>
+    <label>Tags:</label>
+    <div style="max-height:140px;overflow:auto;border:1px solid #ddd;padding:6px;">
+      {{range .Tags}}<label style="display:inline-block;margin-right:8px;">
+        <input type="checkbox" name="tagsExisting" value="{{.}}"/> {{.}}
+      </label>{{end}}
+    </div>
+    <div style="margin-top:6px;">
+      <label>Add tags (comma-separated): <input name="tags"></label>
+    </div>
+  </div>
+  <div>
+    <label>Due:</label>
+    <input type="date" name="dueDate" />
+    <span style="margin:0 8px;">or</span>
+    <input name="due" placeholder="e.g. friday / 2025-12-31" />
+  </div>
+  <div style="margin-top:8px;">
+    <button type="submit">Create template</button>
+    <a href="/templates" style="margin-left:8px;">Cancel</a>
+  </div>
+ </form>
+        `)
+		uname, _ := auth.UsernameFromRequest(r)
+		show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+		_ = t.Execute(w, map[string]any{
+			"Active":      activeFromPath(r.URL.Path),
+			"Projects":    projects,
+			"Tags":        tags,
+			"ShowCmdLog":  show,
+			"CmdEntries":  entries,
+			"MoreURL":     moreURL,
+			"CanShowMore": canMore,
+			"ReturnURL":   ret,
+		})
+	})
+
 	// Context anzeigen/setzen
 	s.mux.HandleFunc("/context", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -645,8 +847,11 @@ func (s *Server) routes() {
 		// Fetch existing projects and tags
 		projRes := s.runner.Run(username, 5_000_000_000, "show-projects")
 		tagRes := s.runner.Run(username, 5_000_000_000, "show-tags")
+		tmplRes := s.runner.Run(username, 5_000_000_000, "show-templates")
 		projects := parseProjectsFromOutput(projRes.Stdout)
 		tags := parseTagsFromOutput(tagRes.Stdout)
+		templates := parseTemplatesFromOutput(tmplRes.Stdout)
+		selectedTemplate := r.URL.Query().Get("template")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		t := template.Must(s.layoutTpl.Clone())
 		_, _ = t.New("content").Parse(`
@@ -679,13 +884,20 @@ func (s *Server) routes() {
     <span style="margin:0 8px;">or</span>
     <input name="due" placeholder="e.g. friday / 2025-12-31" />
   </div>
+  <div>
+    <label>Template:</label>
+    <select name="template">
+      <option value="">(none)</option>
+      {{range .Templates}}<option value="{{index . "id"}}" {{if eq $.SelectedTemplate (index . "id")}}selected{{end}}>#{{index . "id"}}: {{index . "summary"}}</option>{{end}}
+    </select>
+  </div>
   <div style="margin-top:8px;"><button type="submit">Create</button></div>
  </form>
         `)
 		uname, _ := auth.UsernameFromRequest(r)
 		show, entries, moreURL, canMore, ret := s.footerData(r, uname)
 		_ = t.Execute(w, map[string]any{
-			"Active": activeFromPath(r.URL.Path), "Projects": projects, "Tags": tags,
+			"Active": activeFromPath(r.URL.Path), "Projects": projects, "Tags": tags, "Templates": templates, "SelectedTemplate": selectedTemplate,
 			"ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret,
 		})
 	})
@@ -753,6 +965,10 @@ func (s *Server) routes() {
 		}
 		if due != "" {
 			args = append(args, "due:"+quoteIfNeeded(due))
+		}
+		// Template support
+		if templateID := strings.TrimSpace(r.FormValue("template")); templateID != "" {
+			args = append(args, "template:"+templateID)
 		}
 		username, _ := auth.UsernameFromRequest(r)
 		res := s.runner.Run(username, 10_000_000_000, args...) // 10s

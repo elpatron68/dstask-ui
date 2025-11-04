@@ -1,20 +1,21 @@
 package server
 
 import (
-    "html/template"
-    "net/http"
-    "regexp"
-    "strings"
-    "github.com/elpatron68/dstask-ui/internal/auth"
-    "sort"
+	"html/template"
+	"net/http"
+	"regexp"
+	"sort"
+	"strings"
+
+	"github.com/elpatron68/dstask-ui/internal/auth"
 )
 
 var idLineRe = regexp.MustCompile(`^\s*(\d+)\b`)
 
 // renderListHTML rendert eine HTML-Tabelle: Spalten ID, Text, Aktionen.
 func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title string, raw string) {
-    t := template.Must(s.layoutTpl.Clone())
-    _, _ = t.New("content").Parse(`
+	t := template.Must(s.layoutTpl.Clone())
+	_, _ = t.New("content").Parse(`
 <h2>{{.Title}}</h2>
 {{if .Ok}}<div style="background:#d4edda;border:1px solid #c3e6cb;color:#155724;padding:8px;margin-bottom:8px;">Action successful</div>{{end}}
 <form method="get" style="margin-bottom:8px">
@@ -53,124 +54,167 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
 </table>
 `)
 
-    type row struct {
-        IsTask bool
-        ID     string
-        Status string
-        Text   string
-    }
-    rows := make([]row, 0, 64)
-    taskCount := 0
-    for _, line := range strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n") {
-        l := strings.TrimRight(line, "\n")
-        if l == "" { continue }
-        if idxs := idLineRe.FindStringSubmatchIndex(l); len(idxs) == 4 {
-            id := l[idxs[2]:idxs[3]]
-            after := l[idxs[3]:]
-            text := strings.TrimSpace(after)
-            rows = append(rows, row{IsTask:true, ID:id, Status:"", Text:text})
-            taskCount++
-        } else {
-            rows = append(rows, row{IsTask:false, Text:l})
-        }
-    }
+	type row struct {
+		IsTask bool
+		ID     string
+		Status string
+		Text   string
+	}
+	rows := make([]row, 0, 64)
+	taskCount := 0
+	for _, line := range strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n") {
+		l := strings.TrimRight(line, "\n")
+		if l == "" {
+			continue
+		}
+		if idxs := idLineRe.FindStringSubmatchIndex(l); len(idxs) == 4 {
+			id := l[idxs[2]:idxs[3]]
+			after := l[idxs[3]:]
+			text := strings.TrimSpace(after)
+			rows = append(rows, row{IsTask: true, ID: id, Status: "", Text: text})
+			taskCount++
+		} else {
+			rows = append(rows, row{IsTask: false, Text: l})
+		}
+	}
 
-    // Falls keine Task-Zeilen erkannt wurden, als Plaintext ausgeben
-    if taskCount == 0 {
-        _, _ = t.New("content").Parse(`
+	// Falls keine Task-Zeilen erkannt wurden, als Plaintext ausgeben
+	if taskCount == 0 {
+		_, _ = t.New("content").Parse(`
 <h2>{{.Title}}</h2>
 <pre style="white-space: pre-wrap;">{{.Body}}</pre>
 `)
-        _ = t.Execute(w, map[string]any{
-            "Title": title,
-            "Body":  raw,
-        })
-        return
-    }
+		_ = t.Execute(w, map[string]any{
+			"Title": title,
+			"Body":  raw,
+		})
+		return
+	}
 
-    // sort rows (id/status/text)
-    sortKey := r.URL.Query().Get("sort")
-    sortDir := r.URL.Query().Get("dir")
-    sort.SliceStable(rows, func(i, j int) bool {
-        less := false
-        switch sortKey {
-        case "id":
-            less = rows[i].ID < rows[j].ID
-        case "status":
-            less = strings.ToLower(rows[i].Status) < strings.ToLower(rows[j].Status)
-        case "text":
-            less = strings.ToLower(rows[i].Text) < strings.ToLower(rows[j].Text)
-        default:
-            return rows[i].ID < rows[j].ID
-        }
-        if strings.ToLower(sortDir) == "desc" { return !less }
-        return less
-    })
-    mk := func(col string) string {
-        q := r.URL.Query(); dir := q.Get("dir")
-        if q.Get("sort") == col { if strings.ToLower(dir)=="asc"{dir="desc"} else {dir="asc"} } else { dir="asc" }
-        q.Set("sort", col); q.Set("dir", dir); q.Set("html","1")
-        return r.URL.Path + "?" + q.Encode()
-    }
-    uname, _ := auth.UsernameFromRequest(r)
-    show, entries, moreURL, canMore, ret := s.footerData(r, uname)
-    _ = t.Execute(w, map[string]any{
-        "Title": title,
-        "Rows":  rows,
-        "Q": r.URL.Query().Get("q"),
-        "Ok": r.URL.Query().Get("ok") != "",
-        "Active": activeFromPath(r.URL.Path),
-        "Flash": s.getFlash(r),
-        "ShowCmdLog": show,
-        "CmdEntries": entries,
-        "MoreURL": moreURL,
-        "CanShowMore": canMore,
-        "ReturnURL": ret,
-        "Sort": map[string]string{"ID": mk("id"), "Status": mk("status"), "Text": mk("text")},
-    })
+	// sort rows (id/status/text)
+	sortKey := r.URL.Query().Get("sort")
+	sortDir := r.URL.Query().Get("dir")
+	sort.SliceStable(rows, func(i, j int) bool {
+		less := false
+		switch sortKey {
+		case "id":
+			less = rows[i].ID < rows[j].ID
+		case "status":
+			less = strings.ToLower(rows[i].Status) < strings.ToLower(rows[j].Status)
+		case "text":
+			less = strings.ToLower(rows[i].Text) < strings.ToLower(rows[j].Text)
+		default:
+			return rows[i].ID < rows[j].ID
+		}
+		if strings.ToLower(sortDir) == "desc" {
+			return !less
+		}
+		return less
+	})
+	mk := func(col string) string {
+		q := r.URL.Query()
+		dir := q.Get("dir")
+		if q.Get("sort") == col {
+			if strings.ToLower(dir) == "asc" {
+				dir = "desc"
+			} else {
+				dir = "asc"
+			}
+		} else {
+			dir = "asc"
+		}
+		q.Set("sort", col)
+		q.Set("dir", dir)
+		q.Set("html", "1")
+		return r.URL.Path + "?" + q.Encode()
+	}
+	uname, _ := auth.UsernameFromRequest(r)
+	show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+	_ = t.Execute(w, map[string]any{
+		"Title":       title,
+		"Rows":        rows,
+		"Q":           r.URL.Query().Get("q"),
+		"Ok":          r.URL.Query().Get("ok") != "",
+		"Active":      activeFromPath(r.URL.Path),
+		"Flash":       s.getFlash(r),
+		"ShowCmdLog":  show,
+		"CmdEntries":  entries,
+		"MoreURL":     moreURL,
+		"CanShowMore": canMore,
+		"ReturnURL":   ret,
+		"Sort":        map[string]string{"ID": mk("id"), "Status": mk("status"), "Text": mk("text")},
+	})
 }
 
 // renderExportTable rendert Tasks aus `dstask export` als Tabelle.
 // `rows` erwartet bereits gefilterte/aufbereitete Zeilen.
 func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title string, rows []map[string]string) {
-    t := template.Must(s.layoutTpl.Clone())
-    // enrich rows with action flags and computed flags
-    rowsAny := make([]map[string]any, 0, len(rows))
-    for _, m := range rows {
-        status := strings.ToLower(m["status"])
-        canStart := status == "pending" || status == "paused"
-        canStop := status == "active"
-        canDone := status != "resolved" && status != "done"
-        mm := map[string]any{}
-        for k, v := range m { mm[k] = v }
-        if cs, ok := m["created"]; ok { mm["created"] = formatDateShort(cs) }
-        if rs, ok := m["resolved"]; ok { mm["resolved"] = formatDateShort(rs) }
-        if ds, ok := m["due"]; ok { mm["due"] = formatDateShort(ds) }
-        mm["canStart"] = canStart
-        mm["canStop"] = canStop
-        mm["canDone"] = canDone
-        if due, ok := m["due"]; ok { mm["overdue"] = isOverdue(due) }
-        rowsAny = append(rowsAny, mm)
-    }
-    // sorting
-    sortKey := r.URL.Query().Get("sort")
-    sortDir := r.URL.Query().Get("dir")
-    SortRowsMaps(rows, sortKey, sortDir)
-    mk := func(col string) string {
-        q := r.URL.Query()
-        dir := q.Get("dir")
-        if q.Get("sort") == col {
-            if strings.ToLower(dir) == "asc" { dir = "desc" } else { dir = "asc" }
-        } else { dir = "asc" }
-        q.Set("sort", col); q.Set("dir", dir); q.Set("html", "1")
-        return r.URL.Path + "?" + q.Encode()
-    }
-    _, _ = t.New("content").Parse(`
+	t := template.Must(s.layoutTpl.Clone())
+	// enrich rows with action flags and computed flags
+	rowsAny := make([]map[string]any, 0, len(rows))
+	for _, m := range rows {
+		status := strings.ToLower(m["status"])
+		canStart := status == "pending" || status == "paused"
+		canStop := status == "active"
+		canDone := status != "resolved" && status != "done"
+		mm := map[string]any{}
+		for k, v := range m {
+			mm[k] = v
+		}
+		if cs, ok := m["created"]; ok {
+			mm["created"] = formatDateShort(cs)
+		}
+		if rs, ok := m["resolved"]; ok {
+			mm["resolved"] = formatDateShort(rs)
+		}
+		if ds, ok := m["due"]; ok {
+			mm["due"] = formatDateShort(ds)
+		}
+		mm["canStart"] = canStart
+		mm["canStop"] = canStop
+		mm["canDone"] = canDone
+		if due, ok := m["due"]; ok {
+			mm["overdue"] = isOverdue(due)
+		}
+		rowsAny = append(rowsAny, mm)
+	}
+	// sorting
+	sortKey := r.URL.Query().Get("sort")
+	sortDir := r.URL.Query().Get("dir")
+	SortRowsMaps(rows, sortKey, sortDir)
+	mk := func(col string) string {
+		q := r.URL.Query()
+		dir := q.Get("dir")
+		if q.Get("sort") == col {
+			if strings.ToLower(dir) == "asc" {
+				dir = "desc"
+			} else {
+				dir = "asc"
+			}
+		} else {
+			dir = "asc"
+		}
+		q.Set("sort", col)
+		q.Set("dir", dir)
+		q.Set("html", "1")
+		return r.URL.Path + "?" + q.Encode()
+	}
+	_, _ = t.New("content").Parse(`
 <h2>{{.Title}}</h2>
 <form method="get" style="margin-bottom:8px">
   <input type="hidden" name="html" value="1"/>
-  <input name="q" value="{{.Q}}" placeholder="Filter: +tag project:foo text" style="width:60%" />
-  <button type="submit">Filtern</button>
+  <input name="q" value="{{.Q}}" placeholder="Filter: +tag project:foo text" style="width:50%" />
+  <label style="margin-left:8px;">Due filter:
+    <select name="dueFilterType" style="margin-left:4px;">
+      <option value="">(none)</option>
+      <option value="before" {{if eq .DueFilterType "before"}}selected{{end}}>before</option>
+      <option value="after" {{if eq .DueFilterType "after"}}selected{{end}}>after</option>
+      <option value="on" {{if eq .DueFilterType "on"}}selected{{end}}>on</option>
+      <option value="overdue" {{if eq .DueFilterType "overdue"}}selected{{end}}>overdue</option>
+    </select>
+    <input name="dueFilterDate" value="{{.DueFilterDate}}" placeholder="friday / 2025-12-31" style="width:180px; margin-left:4px;" {{if eq .DueFilterType "overdue"}}disabled{{end}} />
+  </label>
+  <button type="submit" style="margin-left:8px;">Filtern</button>
 </form>
 <table border="1" cellpadding="4" cellspacing="0">
   <thead><tr>
@@ -230,29 +274,43 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
   <button type="submit" style="margin-left:8px;">Apply</button>
 </form>
 `)
-    uname, _ := auth.UsernameFromRequest(r)
-    show, entries, moreURL, canMore, ret := s.footerData(r, uname)
-    _ = t.Execute(w, map[string]any{ "Title": title, "Rows": rowsAny, "Q": r.URL.Query().Get("q"), "Active": activeFromPath(r.URL.Path),
-        "Flash": s.getFlash(r),
-        "ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret,
-        "Sort": map[string]string{
-            "ID": mk("id"), "Status": mk("status"), "Summary": mk("summary"), "Project": mk("project"), "Priority": mk("priority"), "Due": mk("due"), "Tags": mk("tags"),
-            "Created": mk("created"), "Resolved": mk("resolved"), "Age": mk("age"),
-        },
-    })
+	uname, _ := auth.UsernameFromRequest(r)
+	show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+	q := r.URL.Query()
+	dueFilterType := q.Get("dueFilterType")
+	dueFilterDate := q.Get("dueFilterDate")
+	_ = t.Execute(w, map[string]any{"Title": title, "Rows": rowsAny, "Q": q.Get("q"), "Active": activeFromPath(r.URL.Path),
+		"Flash":      s.getFlash(r),
+		"ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret,
+		"DueFilterType": dueFilterType, "DueFilterDate": dueFilterDate,
+		"Sort": map[string]string{
+			"ID": mk("id"), "Status": mk("status"), "Summary": mk("summary"), "Project": mk("project"), "Priority": mk("priority"), "Due": mk("due"), "Tags": mk("tags"),
+			"Created": mk("created"), "Resolved": mk("resolved"), "Age": mk("age"),
+		},
+	})
 }
 
 // renderProjectsTable rendert eine Tabelle für Projekte
 func (s *Server) renderProjectsTable(w http.ResponseWriter, r *http.Request, title string, rows []map[string]string) {
-    t := template.Must(s.layoutTpl.Clone())
-    SortRowsMaps(rows, r.URL.Query().Get("sort"), r.URL.Query().Get("dir"))
-    mk := func(col string) string {
-        q := r.URL.Query(); dir := q.Get("dir")
-        if q.Get("sort") == col { if strings.ToLower(dir)=="asc"{dir="desc"} else {dir="asc"} } else { dir="asc" }
-        q.Set("sort", col); q.Set("dir", dir)
-        return r.URL.Path + "?" + q.Encode()
-    }
-    _, _ = t.New("content").Parse(`
+	t := template.Must(s.layoutTpl.Clone())
+	SortRowsMaps(rows, r.URL.Query().Get("sort"), r.URL.Query().Get("dir"))
+	mk := func(col string) string {
+		q := r.URL.Query()
+		dir := q.Get("dir")
+		if q.Get("sort") == col {
+			if strings.ToLower(dir) == "asc" {
+				dir = "desc"
+			} else {
+				dir = "asc"
+			}
+		} else {
+			dir = "asc"
+		}
+		q.Set("sort", col)
+		q.Set("dir", dir)
+		return r.URL.Path + "?" + q.Encode()
+	}
+	_, _ = t.New("content").Parse(`
 <h2>{{.Title}}</h2>
 <table border="1" cellpadding="4" cellspacing="0">
   <thead><tr>
@@ -275,15 +333,13 @@ func (s *Server) renderProjectsTable(w http.ResponseWriter, r *http.Request, tit
   </tbody>
 </table>
 `)
-    uname, _ := auth.UsernameFromRequest(r)
-    show, entries, moreURL, canMore, ret := s.footerData(r, uname)
-    _ = t.Execute(w, map[string]any{ "Title": title, "Rows": rows, "Active": activeFromPath(r.URL.Path),
-        "ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret,
-        "Sort": map[string]string{ "Name": mk("name"), "Open": mk("taskCount"), "Resolved": mk("resolvedCount"), "Active": mk("active"), "Priority": mk("priority") },
-    })
+	uname, _ := auth.UsernameFromRequest(r)
+	show, entries, moreURL, canMore, ret := s.footerData(r, uname)
+	_ = t.Execute(w, map[string]any{"Title": title, "Rows": rows, "Active": activeFromPath(r.URL.Path),
+		"ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret,
+		"Sort": map[string]string{"Name": mk("name"), "Open": mk("taskCount"), "Resolved": mk("resolvedCount"), "Active": mk("active"), "Priority": mk("priority")},
+	})
 }
 
 // escapeExceptBasic lässt die eingefügten Aktionslinks intakt, escaped sonst HTML.
 func escapeExceptBasic(s string) string { return s }
-
-
