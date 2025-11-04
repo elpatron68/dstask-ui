@@ -1,6 +1,16 @@
 # dstask-web (Go Web UI for dstask)
 
-[![Test Coverage](https://img.shields.io/badge/coverage-33.2%25-0366d6.svg)](#)
+[![Build](https://github.com/elpatron68/dstask-ui/actions/workflows/ci.yml/badge.svg)](https://github.com/elpatron68/dstask-ui/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/elpatron68/dstask-ui/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/elpatron68/dstask-ui/actions/workflows/codeql-analysis.yml)
+[![Staticcheck](https://github.com/elpatron68/dstask-ui/actions/workflows/staticcheck.yml/badge.svg)](https://github.com/elpatron68/dstask-ui/actions/workflows/staticcheck.yml)
+[![Codecov](https://codecov.io/gh/elpatron68/dstask-ui/branch/master/graph/badge.svg)](https://codecov.io/gh/elpatron68/dstask-ui)
+![Go Version](https://img.shields.io/github/go-mod/go-version/elpatron68/dstask-ui)
+![License](https://img.shields.io/github/license/elpatron68/dstask-ui)
+![Release](https://img.shields.io/github/v/release/elpatron68/dstask-ui)
+![Downloads](https://img.shields.io/github/downloads/elpatron68/dstask-ui/total)
+![Last commit](https://img.shields.io/github/last-commit/elpatron68/dstask-ui)
+![Issues](https://img.shields.io/github/issues/elpatron68/dstask-ui) ![PRs](https://img.shields.io/github/issues-pr/elpatron68/dstask-ui)
+![Made with Go](https://img.shields.io/badge/Made%20with-Go-00ADD8?logo=go&logoColor=white)
 
 A lightweight web UI to operate *[dstask](https://github.com/naggie/dstask)* from the browser. Implemented in Go, with Basic Auth, per-user repo mapping, and Windows support.
 ## Onboarding / Erste Schritte

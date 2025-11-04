@@ -1,53 +1,59 @@
 package server
 
 import (
-	"os"
-	"path/filepath"
-	"testing"
-	"net/http/httptest"
-	"strings"
+    "os"
+    "os/exec"
+    "path/filepath"
+    "runtime"
+    "testing"
+    "net/http/httptest"
+    "strings"
 
-	"github.com/elpatron68/dstask-ui/internal/auth"
-	"github.com/elpatron68/dstask-ui/internal/config"
+    "github.com/elpatron68/dstask-ui/internal/auth"
+    "github.com/elpatron68/dstask-ui/internal/config"
 )
 
 // createDstaskStub erzeugt ein Shell-Script, das je nach Subcommand vordefinierte Ausgaben liefert.
 func createDstaskStub(t *testing.T, dir string) string {
-	t.Helper()
-	stub := filepath.Join(dir, "dstask-stub.sh")
-	content := `#!/usr/bin/env bash
-subcmd="$1"
-case "$subcmd" in
-  show-projects)
-    cat <<'JSON'
-[
-  {"name":"alpha","taskCount":3,"resolvedCount":1,"active":1,"priority":"P2"},
-  {"name":"beta","taskCount":5,"resolvedCount":0,"active":2,"priority":"P1"}
-]
-JSON
-    ;;
-  show-tags)
-    echo "+ui"
-    echo "+backend"
-    ;;
-  show-templates)
-    cat <<'JSON'
-[
-  {"id": "1", "summary": "Template A", "project": "alpha", "tags": ["ui"], "due": "2025-12-31"},
-  {"id": "2", "summary": "Template B", "project": "beta", "tags": ["backend"], "due": ""}
-]
-JSON
-    ;;
-  *)
-    # default JSON export minimal
-    echo '[]'
-    ;;
- esac
+    t.Helper()
+    // Build a small Go binary as cross-platform stub
+    src := filepath.Join(dir, "dstask_stub_main.go")
+    bin := filepath.Join(dir, "dstask-stub")
+    if runtime.GOOS == "windows" {
+        bin += ".exe"
+    }
+    code := `package main
+import (
+  "encoding/json"
+  "fmt"
+  "os"
+)
+func main(){
+  if len(os.Args) < 2 { fmt.Println("[]"); return }
+  switch os.Args[1] {
+  case "show-projects":
+    fmt.Println("[{\"name\":\"alpha\",\"taskCount\":3,\"resolvedCount\":1,\"active\":1,\"priority\":\"P2\"},{\"name\":\"beta\",\"taskCount\":5,\"resolvedCount\":0,\"active\":2,\"priority\":\"P1\"}]")
+  case "show-tags":
+    fmt.Println("+ui")
+    fmt.Println("+backend")
+  case "show-templates":
+    type T struct{ ID string ` + "`json:\"id\"`" + `; Summary string ` + "`json:\"summary\"`" + `; Project string ` + "`json:\"project\"`" + `; Tags []string ` + "`json:\"tags\"`" + `; Due string ` + "`json:\"due\"`" + ` }
+    out, _ := json.Marshal([]T{{ID:"1",Summary:"Template A",Project:"alpha",Tags:[]string{"ui"},Due:"2025-12-31"},{ID:"2",Summary:"Template B",Project:"beta",Tags:[]string{"backend"}}})
+    fmt.Println(string(out))
+  default:
+    fmt.Println("[]")
+  }
+}
 `
-	if err := os.WriteFile(stub, []byte(content), 0755); err != nil {
-		t.Fatalf("write stub failed: %v", err)
-	}
-	return stub
+    if err := os.WriteFile(src, []byte(code), 0644); err != nil {
+        t.Fatalf("write stub source failed: %v", err)
+    }
+    cmd := exec.Command("go", "build", "-o", bin, src)
+    cmd.Dir = dir
+    if out, err := cmd.CombinedOutput(); err != nil {
+        t.Fatalf("build stub failed: %v, out=%s", err, string(out))
+    }
+    return bin
 }
 
 func newTestServerWithStub(t *testing.T, stub string, home string) *Server {

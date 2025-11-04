@@ -2,6 +2,34 @@ name: CI
 
 on:
   push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - name: Tidy
+        run: go mod tidy
+      - name: Build
+        run: go build ./...
+      - name: Test with coverage
+        run: go test ./... -coverprofile=coverage.out
+      - name: Upload coverage to Codecov
+        if: ${{ secrets.CODECOV_TOKEN != '' }}
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.out
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+name: CI
+
+on:
+  push:
     branches: [ "**" ]
     tags: [ 'v*' ]
   pull_request:
