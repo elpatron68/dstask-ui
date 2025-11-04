@@ -14,12 +14,17 @@ import (
 func main() {
 	username := getenvDefault("DSTWEB_USER", "admin")
 	password := getenvDefault("DSTWEB_PASS", "admin")
-	listenAddr := getenvDefault("DSTWEB_LISTEN", ":8080")
 
 	// Config laden (optional config.yaml)
 	cfg, err := config.Load("")
 	if err != nil {
 		stdlog.Fatalf("config error: %v", err)
+	}
+
+	// Listen address: config.yaml > ENV > default
+	listenAddr := cfg.Listen
+	if listenAddr == "" {
+		listenAddr = getenvDefault("DSTWEB_LISTEN", ":8080")
 	}
 
 	// Init logging

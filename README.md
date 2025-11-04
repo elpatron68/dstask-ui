@@ -78,6 +78,7 @@ See the provided `config.yaml` for an example. Fields:
 
 ```yaml
 dstaskBin: "C:\\tools\\dstask.exe"   # path to dstask.exe (Windows)
+listen: ":8080"                        # listen address (e.g., ":8080" or "127.0.0.1:3000")
 users:                                   # optional; if empty, env fallback is used
   - username: "admin"
     passwordHash: "<bcrypt-hash>"        # bcrypt (e.g., cost 10)
@@ -92,6 +93,7 @@ ui:
 - Linux/macOS: set `dstaskBin` to your `dstask` path if it is not in PATH, e.g. `/usr/local/bin/dstask`.
 - You can override via env at runtime:
   - `DSTWEB_DSTASK_BIN` – absolute path to dstask
+  - `DSTWEB_LISTEN` – listen address (e.g., `:8080` or `127.0.0.1:3000`)
   - `DSTWEB_LOG_LEVEL` – `debug|info|warn|error`
   - `DSTWEB_UI_SHOW_CMDLOG` – `true|false`
   - `DSTWEB_CMDLOG_MAX` – integer buffer size
@@ -100,6 +102,7 @@ ui:
   - If the path is a HOME dir, `HOME/.dstask` is used.
   - If it points to `.dstask`, that directory is used directly.
 - At runtime, `dstaskBin` can be overridden via `DSTWEB_DSTASK_BIN`.
+- Listen address can be overridden via `DSTWEB_LISTEN` (e.g., `:8080` or `127.0.0.1:3000`).
 - Logging level can be overridden via `DSTWEB_LOG_LEVEL`.
 - Command log UI can be overridden via `DSTWEB_UI_SHOW_CMDLOG` (true/false) and `DSTWEB_CMDLOG_MAX` (int).
 
