@@ -1,5 +1,7 @@
 # dstask-web (Go Web UI for dstask)
 
+[![Test Coverage](https://img.shields.io/badge/coverage-33.2%25-0366d6.svg)](#)
+
 A lightweight web UI to operate *[dstask](https://github.com/naggie/dstask)* from the browser. Implemented in Go, with Basic Auth, per-user repo mapping, and Windows support.
 ## Onboarding / Erste Schritte
 
