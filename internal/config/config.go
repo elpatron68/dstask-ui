@@ -80,8 +80,8 @@ func Load(path string) (*Config, error) {
             if err := writeDefaultConfigFile(path, cfg); err != nil {
                 return nil, err
             }
-            applog.Infof("Konfigurationsdatei wurde mit Default-Werten angelegt: %s", path)
-            applog.Infof("Hinweis: Passen Sie bei Bedarf `repos` und weitere Felder in %s an.", path)
+            applog.Infof("configuration file created with default values: %s", path)
+            applog.Infof("note: adjust `repos` and other fields as needed in %s", path)
             return cfg, nil
         }
         return nil, err

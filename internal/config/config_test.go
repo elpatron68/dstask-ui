@@ -8,9 +8,10 @@ import (
 
 func TestDefaultHasReasonableValues(t *testing.T) {
 	cfg := Default()
-	if cfg.DstaskBin == "" {
-		t.Fatalf("expected default dstask bin")
-	}
+    // dstaskBin is optional now; default may be empty and PATH autodetection is used at runtime
+    if cfg.DstaskBin != "" {
+        t.Fatalf("expected empty default dstask bin, got %q", cfg.DstaskBin)
+    }
 	if cfg.Listen != ":8080" {
 		t.Fatalf("expected default listen :8080, got %q", cfg.Listen)
 	}
