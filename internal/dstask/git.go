@@ -21,7 +21,7 @@ func (r *Runner) RepoDirForUser(username string) (string, error) {
         }
     }
     if strings.TrimSpace(home) == "" {
-        return "", errors.New("HOME konnte nicht ermittelt werden")
+        return "", errors.New("home directory could not be determined")
     }
     repo := home
     if filepath.Base(strings.ToLower(repo)) != ".dstask" {
@@ -69,10 +69,10 @@ func (r *Runner) GitSetRemoteOrigin(username, url string) error {
     if err != nil {
         return err
     }
-    // .git muss vorhanden sein – andernfalls soll explizit geklont werden
+    // .git must exist – otherwise cloning should be used explicitly
     if _, statErr := os.Stat(filepath.Join(repo, ".git")); statErr != nil {
-        applog.Warnf("GitSetRemoteOrigin: kein Git-Repository in %s – Remote kann nicht gesetzt werden", repo)
-        return errors.New("kein Git-Repository vorhanden – bitte Repository klonen")
+        applog.Warnf("GitSetRemoteOrigin: no Git repository in %s – cannot set remote", repo)
+        return errors.New("no Git repository present – please clone the repository")
     }
     env := os.Environ()
     if home, ok := config.ResolveHomeForUsername(r.cfg, username); ok && home != "" {
@@ -115,7 +115,7 @@ func (r *Runner) GitSetRemoteOrigin(username, url string) error {
         applog.Warnf("GitSetRemoteOrigin: remote set/add failed in %s: %v", repo, err)
         return err
     }
-    applog.Infof("GitSetRemoteOrigin: origin=%s konfiguriert in %s", url, repo)
+    applog.Infof("GitSetRemoteOrigin: origin=%s configured in %s", url, repo)
     return nil
 }
 
@@ -149,30 +149,30 @@ func (r *Runner) GitCloneRemote(username, url string) error {
 
     // Existenz prüfen
     if _, err := os.Stat(repo); errors.Is(err, os.ErrNotExist) {
-        applog.Infof("GitCloneRemote: Verzeichnis fehlt, klone nach %s", repo)
+        applog.Infof("GitCloneRemote: directory missing, cloning to %s", repo)
         cmd := exec.Command("git", "clone", url, repo)
         cmd.Env = env
         if err := cmd.Run(); err != nil {
-            applog.Warnf("GitCloneRemote: clone nach %s fehlgeschlagen: %v", repo, err)
+            applog.Warnf("GitCloneRemote: clone to %s failed: %v", repo, err)
             return err
         }
         return nil
     }
 
-    // Verzeichnis existiert: prüfen, ob leer
+    // Directory exists: check if empty
     empty, err := isDirEmpty(repo)
     if err != nil {
         return err
     }
     if !empty {
-        return errors.New("zielverzeichnis ist nicht leer – klonen abgebrochen")
+        return errors.New("target directory is not empty – aborting clone")
     }
-    applog.Infof("GitCloneRemote: Verzeichnis existiert und ist leer, klone in %s (.)", repo)
+    applog.Infof("GitCloneRemote: directory exists and is empty, cloning into %s (.)", repo)
     cmd := exec.Command("git", "clone", url, ".")
     cmd.Env = env
     cmd.Dir = repo
     if err := cmd.Run(); err != nil {
-        applog.Warnf("GitCloneRemote: clone in bestehendes Verzeichnis %s fehlgeschlagen: %v", repo, err)
+        applog.Warnf("GitCloneRemote: clone into existing directory %s failed: %v", repo, err)
         return err
     }
     return nil

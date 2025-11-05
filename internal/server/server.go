@@ -1990,7 +1990,7 @@ func (s *Server) routes() {
 			_ = t.Execute(w, nil)
 		case http.MethodPost:
 			username, _ := auth.UsernameFromRequest(r)
-			applog.Infof("/sync POST von %s", username)
+            applog.Infof("/sync POST from %s", username)
             // Falls kein Git-Repo vorhanden ist, biete Clone-Form an
             if uhome, ok := config.ResolveHomeForUsername(s.cfg, username); ok && uhome != "" {
                 dir := uhome
@@ -2015,7 +2015,7 @@ func (s *Server) routes() {
             }
             // Falls kein Remote gesetzt ist, biete Remote-Form an
             if u, _ := s.runner.GitRemoteURL(username); strings.TrimSpace(u) == "" {
-				applog.Warnf("/sync: kein Remote konfiguriert für %s", username)
+                applog.Warnf("/sync: no remote configured for %s", username)
                 w.Header().Set("Content-Type", "text/html; charset=utf-8")
                 t := template.Must(s.layoutTpl.Clone())
                 _, _ = t.New("content").Parse(`<h2>Configure remote</h2>
@@ -2032,11 +2032,11 @@ func (s *Server) routes() {
             }
             // Upstream sicherstellen (best effort)
             if _, err := s.runner.GitSetUpstreamIfMissing(username); err != nil {
-                applog.Warnf("/sync: Upstream fehlte; automatisches Setzen ist fehlgeschlagen: %v", err)
+                applog.Warnf("/sync: upstream missing; automatic setup failed: %v", err)
             }
-            applog.Infof("/sync: starte dstask sync für %s", username)
+            applog.Infof("/sync: starting dstask sync for %s", username)
 			res := s.runner.Run(username, 30_000_000_000, "sync") // 30s
-			applog.Infof("/sync: beendet für %s: code=%d timeout=%v err=%v", username, res.ExitCode, res.TimedOut, res.Err)
+            applog.Infof("/sync: finished for %s: code=%d timeout=%v err=%v", username, res.ExitCode, res.TimedOut, res.Err)
 			s.cmdStore.Append(username, "Sync", []string{"sync"})
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			t := template.Must(s.layoutTpl.Clone())
@@ -2084,7 +2084,7 @@ git push -u origin master</pre>`
             return
         }
         username, _ := auth.UsernameFromRequest(r)
-        applog.Infof("/sync/set-remote von %s: url=%s", username, url)
+        applog.Infof("/sync/set-remote from %s: url=%s", username, url)
         if err := s.runner.GitSetRemoteOrigin(username, url); err != nil {
             s.setFlash(w, "error", "Remote konnte nicht gesetzt werden: "+stripANSI(err.Error()))
             http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -2092,7 +2092,7 @@ git push -u origin master</pre>`
         }
         // Upstream setzen, falls nötig (best effort)
         if _, err := s.runner.GitSetUpstreamIfMissing(username); err != nil {
-            applog.Warnf("/sync/set-remote: Upstream setzen fehlgeschlagen: %v", err)
+            applog.Warnf("/sync/set-remote: failed to set upstream: %v", err)
             // Tipp geben, aber nicht als fatal behandeln
             s.setFlash(w, "warning", "Remote gesetzt. Upstream konnte nicht automatisch gesetzt werden. Bitte im Repo setzen.")
             http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -2118,14 +2118,14 @@ git push -u origin master</pre>`
             return
         }
         username, _ := auth.UsernameFromRequest(r)
-        applog.Infof("/sync/clone-remote von %s: url=%s", username, url)
+        applog.Infof("/sync/clone-remote from %s: url=%s", username, url)
         if err := s.runner.GitCloneRemote(username, url); err != nil {
             s.setFlash(w, "error", "Klonen fehlgeschlagen: "+stripANSI(err.Error()))
             http.Redirect(w, r, "/", http.StatusSeeOther)
             return
         }
         if _, err := s.runner.GitSetUpstreamIfMissing(username); err != nil {
-            applog.Warnf("/sync/clone-remote: Upstream setzen fehlgeschlagen: %v", err)
+            applog.Warnf("/sync/clone-remote: failed to set upstream: %v", err)
             s.setFlash(w, "warning", "Klonen erfolgreich. Upstream konnte nicht automatisch gesetzt werden.")
             http.Redirect(w, r, "/", http.StatusSeeOther)
             return

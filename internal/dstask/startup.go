@@ -43,7 +43,7 @@ func ensureDstaskBinary(cfg *config.Config) error {
     if bin == "" {
         if p, err := exec.LookPath("dstask"); err == nil {
             cfg.DstaskBin = p
-            applog.Infof("dstask Binary aus PATH verwendet: %s", p)
+            applog.Infof("using dstask binary from PATH: %s", p)
             return nil
         }
     }
@@ -51,34 +51,34 @@ func ensureDstaskBinary(cfg *config.Config) error {
     // Existiert das angegebene Binary direkt oder im PATH?
     if p, err := exec.LookPath(bin); err == nil {
         cfg.DstaskBin = p
-        applog.Infof("dstask Binary gefunden: %s", p)
+        applog.Infof("dstask binary found: %s", p)
         return nil
     }
 
     // Letzter Versuch: plain "dstask" im PATH
     if p, err := exec.LookPath("dstask"); err == nil {
         cfg.DstaskBin = p
-        applog.Infof("dstask Binary (Fallback) aus PATH: %s", p)
+        applog.Infof("dstask binary (fallback) from PATH: %s", p)
         return nil
     }
 
-    // Nicht gefunden: Download-Seite öffnen und OS-spezifische Instruktionen liefern
+    // Not found: open releases page and return OS-specific instructions
     openReleasesPage()
     return errors.New(buildInstallHint())
 }
 
 func ensureRepoForUser(r *Runner, username string) error {
-    // Bestimme HOME/Repo-Pfad
+    // Determine HOME/repo path
     home, ok := config.ResolveHomeForUsername(r.cfg, username)
     if !ok || strings.TrimSpace(home) == "" {
-        // Fallback: Prozess-HOME
+        // Fallback: use process HOME
         if h, err := os.UserHomeDir(); err == nil && h != "" {
             home = h
         }
     }
     if strings.TrimSpace(home) == "" {
-        // Ohne HOME kein Repo-Setup möglich
-        applog.Warnf("Kein HOME für Nutzer %q ermittelbar – Repo-Check übersprungen", username)
+        // Without HOME we cannot set up the repo
+        applog.Warnf("no HOME detected for user %q – skipping repo check", username)
         return nil
     }
 
@@ -86,7 +86,7 @@ func ensureRepoForUser(r *Runner, username string) error {
     if !strings.HasSuffix(strings.ToLower(repoDir), string(filepath.Separator)+".dstask") && filepath.Base(repoDir) != ".dstask" {
         repoDir = filepath.Join(home, ".dstask")
     }
-    applog.Infof("Repository-Verzeichnis für %q: %s", username, repoDir)
+    applog.Infof("repository directory for %q: %s", username, repoDir)
 
     // Wenn Repo existiert, nichts tun
     if st, err := os.Stat(repoDir); err == nil && st.IsDir() {
@@ -99,23 +99,23 @@ func ensureRepoForUser(r *Runner, username string) error {
         return nil
     }
 
-    // Repo existiert nicht – nicht-interaktive Initialisierung mit stdin="y\n"
-    applog.Infof("dstask-Repository fehlt für %q unter %s – wird angelegt", username, repoDir)
+    // Repo does not exist – non-interactive initialization with stdin="y\n"
+    applog.Infof("dstask repo missing for %q at %s – initializing", username, repoDir)
     res := r.RunWithStdin(username, 10*time.Second, "y\n")
     if res.TimedOut {
-        return errors.New("initialisierung von dstask-repository ist in timeout gelaufen")
+        return errors.New("dstask repository initialization timed out")
     }
     if res.Err != nil || res.ExitCode != 0 {
-        // Häufiger Fall: dstask hat erneut nachgefragt oder stderr liefert Hinweis
-        applog.Warnf("dstask Init stderr: %q", truncate(res.Stderr, 300))
-        return errors.New("dstask-Repository konnte nicht initialisiert werden")
+        // Common case: dstask asked again or stderr contains a hint
+        applog.Warnf("dstask init stderr: %q", truncate(res.Stderr, 300))
+        return errors.New("dstask repository could not be initialized")
     }
 
-    // Nachkontrolle: Verzeichnis sollte jetzt existieren
+    // Post check: directory should now exist
     if st, err := os.Stat(repoDir); err != nil || !st.IsDir() {
-        return errors.New("dstask-Repository wurde nach Initialisierung nicht gefunden")
+        return errors.New("dstask repository not found after initialization")
     }
-    applog.Infof("dstask-Repository angelegt unter %s", repoDir)
+    applog.Infof("dstask repository created at %s", repoDir)
     return nil
 }
 
