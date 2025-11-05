@@ -4,6 +4,7 @@ import (
     "errors"
     "os"
     "path/filepath"
+    "runtime"
     "strconv"
     "strings"
 
@@ -158,6 +159,16 @@ func expandUserPath(path string) string {
     if strings.HasPrefix(path, "~") {
         // Nur direktes ~ oder ~/...
         if len(path) == 1 || path[1] == '/' || path[1] == '\\' {
+            // Plattformübergreifend: Unter Windows erlauben wir "%USERPROFILE%" Auflösung,
+            // sodass die Konfiguration mit "~/..." portabel bleibt.
+            if runtime.GOOS == "windows" {
+                // Ersetze ~ durch %USERPROFILE% und lasse os.ExpandEnv später auflösen
+                // Entferne führenden ~ und eventuellen Separator
+                tail := strings.TrimPrefix(path, "~")
+                tail = strings.TrimPrefix(tail, "/")
+                tail = strings.TrimPrefix(tail, "\\")
+                return filepath.Join("%USERPROFILE%", tail)
+            }
             if home, err := os.UserHomeDir(); err == nil && home != "" {
                 // Ersetze nur das führende ~
                 return filepath.Join(home, strings.TrimPrefix(path, "~"))
