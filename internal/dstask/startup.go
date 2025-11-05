@@ -103,7 +103,7 @@ func ensureRepoForUser(r *Runner, username string) error {
     applog.Infof("dstask-Repository fehlt für %q unter %s – wird angelegt", username, repoDir)
     res := r.RunWithStdin(username, 10*time.Second, "y\n")
     if res.TimedOut {
-        return errors.New("Initialisierung von dstask-Repository ist in Timeout gelaufen")
+        return errors.New("initialisierung von dstask-repository ist in timeout gelaufen")
     }
     if res.Err != nil || res.ExitCode != 0 {
         // Häufiger Fall: dstask hat erneut nachgefragt oder stderr liefert Hinweis

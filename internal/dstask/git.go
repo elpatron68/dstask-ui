@@ -165,7 +165,7 @@ func (r *Runner) GitCloneRemote(username, url string) error {
         return err
     }
     if !empty {
-        return errors.New("Zielverzeichnis ist nicht leer – Klonen abgebrochen")
+        return errors.New("zielverzeichnis ist nicht leer – klonen abgebrochen")
     }
     applog.Infof("GitCloneRemote: Verzeichnis existiert und ist leer, klone in %s (.)", repo)
     cmd := exec.Command("git", "clone", url, ".")
@@ -312,7 +312,7 @@ func (r *Runner) GitRemoteHeadBranch(username string) (string, error) {
             }
         }
     }
-    return "", errors.New("Remote-HEAD konnte nicht ermittelt werden")
+    return "", errors.New("remote-head konnte nicht ermittelt werden")
 }
 
 

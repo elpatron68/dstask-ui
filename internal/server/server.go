@@ -2287,7 +2287,7 @@ func (s *Server) Handler() http.Handler {
 			s.mux.ServeHTTP(w, r)
 			return
 		}
-		realm := fmt.Sprintf("dstask")
+    realm := "dstask"
 		authMiddleware := auth.BasicAuthMiddleware(s.userStore, realm, protected)
 		authMiddleware.ServeHTTP(w, r)
 	})

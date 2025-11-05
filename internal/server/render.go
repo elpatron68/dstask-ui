@@ -426,5 +426,4 @@ func (s *Server) renderProjectsTable(w http.ResponseWriter, r *http.Request, tit
 	})
 }
 
-// escapeExceptBasic lässt die eingefügten Aktionslinks intakt, escaped sonst HTML.
-func escapeExceptBasic(s string) string { return s }
+// (entfernt) escapeExceptBasic war ungenutzt

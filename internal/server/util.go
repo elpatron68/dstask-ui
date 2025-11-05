@@ -17,26 +17,6 @@ import (
 	"github.com/gomarkdown/markdown"
 )
 
-func getAny(m map[string]any, key string) any {
-	if v, ok := m[key]; ok {
-		return v
-	}
-	// manchmal sind Keys anders benannt; versuche einfache Varianten
-	switch key {
-	case "status":
-		if v, ok := m["state"]; ok {
-			return v
-		}
-		if v, ok := m["Status"]; ok {
-			return v
-		}
-		if v, ok := m["State"]; ok {
-			return v
-		}
-	}
-	return nil
-}
-
 func str(v any) string {
 	if v == nil {
 		return ""
