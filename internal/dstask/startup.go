@@ -86,6 +86,7 @@ func ensureRepoForUser(r *Runner, username string) error {
     if !strings.HasSuffix(strings.ToLower(repoDir), string(filepath.Separator)+".dstask") && filepath.Base(repoDir) != ".dstask" {
         repoDir = filepath.Join(home, ".dstask")
     }
+    applog.Infof("Repository-Verzeichnis für %q: %s", username, repoDir)
 
     // Wenn Repo existiert, nichts tun
     if st, err := os.Stat(repoDir); err == nil && st.IsDir() {
