@@ -69,7 +69,7 @@ jobs:
         shell: pwsh
         run: |
           $DSTASK_VERSION = "1.0"
-          $DSTASK_URL = "https://github.com/naggie/dstask/releases/download/${DSTASK_VERSION}/dstask-windows-amd64.exe"
+          $DSTASK_URL = "https://github.com/naggie/dstask/releases/download/$DSTASK_VERSION/dstask-windows-amd64.exe"
           New-Item -ItemType Directory -Force -Path C:\tools | Out-Null
           Invoke-WebRequest -Uri $DSTASK_URL -OutFile C:\tools\dstask.exe
           echo "C:\tools" >> $env:GITHUB_PATH
