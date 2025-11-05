@@ -6,14 +6,14 @@
 # - `dstaskBin` ist optional: Wenn leer/fehlend, wird `dstask` über PATH gesucht.
 # - Repos map login users to their HOME or directly to the .dstask directory.
 
-## dstaskBin: "C:\\tools\\dstask.exe"  # optional; leer lassen, wenn dstask im PATH
+## dstaskBin: "C:\\tools\\dstask.exe"  # optional; leave empty, if dstask is in PATH
 listen: ":8080"   # listen address (e.g., ":8080" for port 8080, "127.0.0.1:3000" for localhost:3000)
 
 # Users (Basic Auth). passwordHash is a bcrypt hash (e.g., cost 10).
 # If omitted, ENV fallback is used (DSTWEB_USER/DSTWEB_PASS).
 users:
   # - username: "admin"
-  #   passwordHash: "<bcrypt-hash-hier-einfuegen>"
+  #   passwordHash: "<insert-bcrypt-hash-here>"
 
 # Mapping user -> repo path. Either HOME (we will use HOME/.dstask)
 # or directly the .dstask directory.
