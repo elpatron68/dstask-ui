@@ -104,7 +104,14 @@ jobs:
           git commit -m "Initial commit"
       - name: Test with coverage
         run: go test ./... -coverprofile=coverage.out
-      - name: Upload coverage to Codecov
+      # Upload coverage to Codecov (public repos work tokenless). Use token when provided.
+      - name: Upload coverage to Codecov (tokenless)
+        if: ${{ env.CODECOV_TOKEN == '' }}
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.out
+          fail_ci_if_error: false
+      - name: Upload coverage to Codecov (with token)
         if: ${{ env.CODECOV_TOKEN != '' }}
         uses: codecov/codecov-action@v4
         with:
