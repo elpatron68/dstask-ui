@@ -16,6 +16,9 @@ jobs:
   test:
     name: Test (Go)
     runs-on: ${{ matrix.os }}
+    env:
+      # Expose Codecov token via env so we can check it safely in step conditions
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
     strategy:
       fail-fast: false
       matrix:
@@ -102,11 +105,11 @@ jobs:
       - name: Test with coverage
         run: go test ./... -coverprofile=coverage.out
       - name: Upload coverage to Codecov
-        if: ${{ secrets.CODECOV_TOKEN != '' }}
+        if: ${{ env.CODECOV_TOKEN != '' }}
         uses: codecov/codecov-action@v4
         with:
           files: coverage.out
-          token: ${{ secrets.CODECOV_TOKEN }}
+          token: ${{ env.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
   build-artifacts:
