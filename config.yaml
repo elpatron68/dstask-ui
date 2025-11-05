@@ -18,11 +18,15 @@ users:
 # Mapping user -> repo path. Either HOME (we will use HOME/.dstask)
 # or directly the .dstask directory.
 repos:
-  # Example 1 (HOME):
-  # admin: "C:\\Users\\admin"
-  # Example 2 (direct .dstask):
-  # admin: "C:\\Users\\admin\\.dstask"
-  # admin: "C:\\Users\\mbusc\\.dstask"
+  # Path rules:
+  # - "~/..." is portable: expands to $HOME/... on Linux/macOS and to %USERPROFILE%\... on Windows
+  # - If value points to a HOME dir, <HOME>/.dstask is used
+  # - If value ends with ".dstask", that directory is used directly
+  # - Environment variables are expanded (e.g., $HOME, %USERPROFILE%)
+  # Examples:
+  # admin: "~/.dstask"           # portable
+  # admin: "~"                   # becomes <HOME> then <HOME>/.dstask is used
+  # admin: "C:\\Users\\admin\\.dstask"  # direct .dstask on Windows
   admin: "~/.dstask"
 
 logging:

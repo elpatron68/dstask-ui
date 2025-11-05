@@ -45,6 +45,30 @@ logging:
 # dstaskBin: "/usr/local/bin/dstask"   # or on Windows: "C:\\tools\\dstask.exe"
 ```
 
+#### Path specification and expansion rules
+
+- **Home shortcut (`~/...`)**:
+  - Linux/macOS: expanded to `$HOME/...`.
+  - Windows: expanded to `%USERPROFILE%\\...` to keep configs portable across OSes.
+- **Direct `.dstask` directory**:
+  - If a repo path ends with `.dstask`, that directory is used directly (no extra appending).
+- **Home directory path**:
+  - If a repo path points to a user home (e.g., `~` or `C:\\Users\\alice`), the effective repo is `<HOME>/.dstask`.
+- **Environment variables**:
+  - All paths support env expansion (e.g., `$HOME`, `%USERPROFILE%`, `$APPDATA`).
+- **Normalization**:
+  - Paths are cleaned via platform-specific normalization.
+
+Examples:
+
+```yaml
+repos:
+  alice: "~/.dstask"              # portable; becomes %USERPROFILE%\\.dstask on Windows
+  bob: "~"                        # resolves to <HOME> then <HOME>/.dstask is used
+  carol: "C:\\Users\\carol\\.dstask"  # direct .dstask directory on Windows
+  dave: "$HOME/.dstask"           # env var expansion on Linux/macOS
+```
+
 - Alternatively, set `DSTWEB_DSTASK_BIN` at runtime to override the `dstask` binary.
 - `repos.<user>` may point to a HOME directory (then `HOME/.dstask` is used) or directly to the `.dstask` directory.
 - `~` and environment variables are expanded.
