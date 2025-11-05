@@ -260,6 +260,7 @@ func (s *Server) routes() {
         // Prüfe Git-Repo vorhanden
         isRepo := false
         repoDir := ""
+        // Primär aus Konfiguration (repos) ableiten
         if home, ok := config.ResolveHomeForUsername(s.cfg, username); ok && home != "" {
             dir := home
             if !strings.HasSuffix(strings.ToLower(dir), ".dstask") {
@@ -268,6 +269,18 @@ func (s *Server) routes() {
             repoDir = dir
             if fi, err := os.Stat(dir + string('/') + ".git"); err == nil && fi.IsDir() {
                 isRepo = true
+            }
+        } else {
+            // Fallback: Prozess-HOME verwenden, um dem Nutzer den erwarteten Pfad anzuzeigen
+            if h, err := os.UserHomeDir(); err == nil && h != "" {
+                d := h
+                if !strings.HasSuffix(strings.ToLower(d), ".dstask") {
+                    d = d + string('/') + ".dstask"
+                }
+                repoDir = d
+                if fi, err := os.Stat(d + string('/') + ".git"); err == nil && fi.IsDir() {
+                    isRepo = true
+                }
             }
         }
         show, entries, moreURL, canMore, ret := s.footerData(r, username)
