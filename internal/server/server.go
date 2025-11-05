@@ -248,7 +248,7 @@ func (s *Server) routes() {
     </form>
   {{end}}
 {{else}}
-  <div style="margin:8px 0;background:#fff3cd;border:1px solid #ffeeba;padding:8px;">Kein Git-Repository im .dstask-Verzeichnis. Du kannst ein Remote hier klonen.</div>
+  <div style="margin:8px 0;background:#fff3cd;border:1px solid #ffeeba;padding:8px;">Kein Git-Repository im .dstask-Verzeichnis. Du kannst ein Remote hier klonen.<br/><small>Verwendetes lokales Verzeichnis: <code>{{.RepoDir}}</code></small></div>
   <form method="post" action="/sync/clone-remote">
     <input name="url" placeholder="https://... oder git@..." style="width:50%" required />
     <button type="submit">Remote klonen</button>
@@ -259,11 +259,13 @@ func (s *Server) routes() {
         remoteURL, _ := s.runner.GitRemoteURL(username)
         // Prüfe Git-Repo vorhanden
         isRepo := false
+        repoDir := ""
         if home, ok := config.ResolveHomeForUsername(s.cfg, username); ok && home != "" {
             dir := home
             if !strings.HasSuffix(strings.ToLower(dir), ".dstask") {
                 dir = dir + string('/') + ".dstask"
             }
+            repoDir = dir
             if fi, err := os.Stat(dir + string('/') + ".git"); err == nil && fi.IsDir() {
                 isRepo = true
             }
@@ -273,6 +275,7 @@ func (s *Server) routes() {
             "User":        username,
             "RemoteURL":   remoteURL,
             "IsGitRepo":   isRepo,
+            "RepoDir":     repoDir,
             "Active":      activeFromPath(r.URL.Path),
             "Flash":       s.getFlash(r),
             "ShowCmdLog":  show,
