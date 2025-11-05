@@ -33,15 +33,16 @@ go build -o bin/dstask-web ./cmd/dstask-web
 ```
 
 ### Configuration (config.yaml)
-- See the provided `config.yaml` for an example. For Linux, a minimal setup:
+- See the provided `config.yaml` for an example. Minimal setup (PATH autodetection):
 
 ```yaml
-dstaskBin: ""             # leave empty if dstask is found via PATH
 listen: ":8080"
 repos:
   admin: "~/.dstask"      # user -> HOME/.dstask
 logging:
   level: "info"
+# dstaskBin is optional; if omitted/empty, dstask is discovered via PATH
+# dstaskBin: "/usr/local/bin/dstask"   # or on Windows: "C:\\tools\\dstask.exe"
 ```
 
 - Alternatively, set `DSTWEB_DSTASK_BIN` at runtime to override the `dstask` binary.
@@ -57,7 +58,7 @@ export DSTWEB_PASS=admin
 ```
 
 ### First-start behavior (setup flow)
-- **dstask binary check**: The binary is taken from `config.yaml` or PATH. If not found, the server fails fast with an error.
+- **dstask binary check**: The binary is taken from `config.yaml` or discovered via PATH. If not found, the server opens the releases page and returns an OS-specific instruction message to install/place `dstask` (see Troubleshooting).
 - **`.dstask` repo check**: For each user (per `repos`) we check whether the `.dstask` directory exists.
   - If missing: the app tries to initialize the `dstask` repository non-interactively (auto-answer "y"). This creates the local structure only; no Git remote is configured.
   - The home page shows whether a `.git` repo is present and whether a remote is configured.
@@ -76,7 +77,9 @@ export DSTWEB_PASS=admin
 
 ### Troubleshooting
 - "address already in use" on `:8080`: stop the other process or set `DSTWEB_LISTEN` (e.g., `127.0.0.1:3000`).
-- `dstask` not found: set `DSTWEB_DSTASK_BIN` or install `dstask`.
+- `dstask` not found:
+  - Install/Download `dstask` from `https://github.com/naggie/dstask/releases`, put it in your PATH (e.g., `/usr/local/bin/dstask` or `C:\\tools\\dstask.exe`) and make it executable.
+  - Or set `DSTWEB_DSTASK_BIN` to the absolute path of the binary.
 - No upstream: set it manually (adjust branch as needed):
 
 ```bash
@@ -159,20 +162,20 @@ $env:DSTWEB_PASS='admin'
 See the provided `config.yaml` for an example. Fields:
 
 ```yaml
-dstaskBin: "C:\\tools\\dstask.exe"   # path to dstask.exe (Windows)
-listen: ":8080"                        # listen address (e.g., ":8080" or "127.0.0.1:3000")
-users:                                   # optional; if empty, env fallback is used
+# dstaskBin: "/usr/local/bin/dstask"      # optional; if omitted, PATH autodetection is used
+listen: ":8080"                           # listen address (e.g., ":8080" or "127.0.0.1:3000")
+users:                                      # optional; if empty, env fallback is used
   - username: "admin"
-    passwordHash: "<bcrypt-hash>"        # bcrypt (e.g., cost 10)
-repos:                                   # username -> HOME or direct .dstask
-  admin: "C:\\Users\\admin"           # or: "C:\\Users\\admin\\.dstask"
+    passwordHash: "<bcrypt-hash>"           # bcrypt (e.g., cost 10)
+repos:                                      # username -> HOME or direct .dstask
+  admin: "~/.dstask"                       # or: "C:\\Users\\admin\\.dstask" on Windows
 logging:
-  level: "info"                          # debug | info | warn | error
+  level: "info"                             # debug | info | warn | error
 ui:
-  showCommandLog: true                   # show command footer by default
-  commandLogMax: 200                     # ring buffer size per user
+  showCommandLog: true                      # show command footer by default
+  commandLogMax: 200                        # ring buffer size per user
 ```
-- Linux/macOS: set `dstaskBin` to your `dstask` path if it is not in PATH, e.g. `/usr/local/bin/dstask`.
+- Linux/macOS: if `dstask` is not in PATH, set `dstaskBin` (e.g. `/usr/local/bin/dstask`).
 - You can override via env at runtime:
   - `DSTWEB_DSTASK_BIN` – absolute path to dstask
   - `DSTWEB_LISTEN` – listen address (e.g., `:8080` or `127.0.0.1:3000`)

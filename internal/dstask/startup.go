@@ -39,8 +39,8 @@ func EnsureReady(cfg *config.Config, usernames []string) error {
 func ensureDstaskBinary(cfg *config.Config) error {
     bin := strings.TrimSpace(cfg.DstaskBin)
 
-    // Falls Windows-Default in nicht-Windows-Umgebung gesetzt ist, versuche PATH-Fallback
-    if bin == "" || (runtime.GOOS != "windows" && (bin == `C:\\tools\\dstask.exe`)) {
+    // Wenn kein expliziter Pfad gesetzt ist, versuche PATH-Autodetektion
+    if bin == "" {
         if p, err := exec.LookPath("dstask"); err == nil {
             cfg.DstaskBin = p
             applog.Infof("dstask Binary aus PATH verwendet: %s", p)
@@ -62,7 +62,9 @@ func ensureDstaskBinary(cfg *config.Config) error {
         return nil
     }
 
-    return errors.New("dstask Binary wurde nicht gefunden – bitte DSTWEB_DSTASK_BIN setzen oder dstask installieren")
+    // Nicht gefunden: Download-Seite öffnen und OS-spezifische Instruktionen liefern
+    openReleasesPage()
+    return errors.New(buildInstallHint())
 }
 
 func ensureRepoForUser(r *Runner, username string) error {
@@ -114,6 +116,32 @@ func ensureRepoForUser(r *Runner, username string) error {
     }
     applog.Infof("dstask-Repository angelegt unter %s", repoDir)
     return nil
+}
+
+// openReleasesPage versucht, die dstask Release-Seite im Standardbrowser zu öffnen.
+func openReleasesPage() {
+    const url = "https://github.com/naggie/dstask/releases"
+    switch runtime.GOOS {
+    case "windows":
+        _ = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+    case "darwin":
+        _ = exec.Command("open", url).Start()
+    default:
+        _ = exec.Command("xdg-open", url).Start()
+    }
+}
+
+// buildInstallHint gibt eine klare, OS-spezifische Anleitung zurück, wie dstask installiert/auffindbar gemacht wird.
+func buildInstallHint() string {
+    const url = "https://github.com/naggie/dstask/releases"
+    switch runtime.GOOS {
+    case "windows":
+        return "dstask wurde nicht gefunden. Bitte von " + url + " herunterladen (Asset: dstask.exe), dann entweder (1) einen Ordner im PATH wählen (z. B. C\\\\Windows\\\\System32 oder C\\\\tools) oder (2) dstask.exe in das Startverzeichnis unserer App legen. Alternativ kann DSTWEB_DSTASK_BIN auf den absoluten Pfad gesetzt werden."
+    case "darwin":
+        return "dstask wurde nicht gefunden. Bitte von " + url + " herunterladen (macOS-Build oder selbst kompilieren), dann nach /usr/local/bin/dstask verschieben und mit chmod +x ausführbar machen. Alternativ PATH anpassen oder DSTWEB_DSTASK_BIN setzen."
+    default:
+        return "dstask wurde nicht gefunden. Bitte von " + url + " herunterladen oder über die Paketverwaltung installieren, dann nach /usr/local/bin/dstask verschieben (chmod +x) oder PATH entsprechend anpassen. Alternativ DSTWEB_DSTASK_BIN setzen."
+    }
 }
 
 

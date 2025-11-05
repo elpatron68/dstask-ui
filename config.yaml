@@ -3,10 +3,10 @@
 # Notes:
 # - If no users are configured here, environment fallback is used:
 #   DSTWEB_USER and DSTWEB_PASS (default: admin/admin).
-# - On Windows, set the path to dstask.exe.
+# - `dstaskBin` ist optional: Wenn leer/fehlend, wird `dstask` über PATH gesucht.
 # - Repos map login users to their HOME or directly to the .dstask directory.
 
-dstaskBin: "C:\\tools\\dstask.exe"
+## dstaskBin: "C:\\tools\\dstask.exe"  # optional; leer lassen, wenn dstask im PATH
 listen: ":8080"   # listen address (e.g., ":8080" for port 8080, "127.0.0.1:3000" for localhost:3000)
 
 # Users (Basic Auth). passwordHash is a bcrypt hash (e.g., cost 10).

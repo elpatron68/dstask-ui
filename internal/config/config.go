@@ -35,7 +35,7 @@ type Config struct {
 
 func Default() *Config {
 	return &Config{
-		DstaskBin: defaultDstaskBin(),
+        DstaskBin: defaultDstaskBin(),
 		Listen:    ":8080",
 		Users:     []UserConfig{},
 		Repos:     map[string]string{},
@@ -45,8 +45,8 @@ func Default() *Config {
 }
 
 func defaultDstaskBin() string {
-	// Windows Default laut Vorgabe
-	return `C:\\tools\\dstask.exe`
+    // Kein Default-Pfad mehr: wir versuchen PATH-Autodetektion beim Start
+    return ""
 }
 
 // Load lädt eine optionale YAML-Datei. Wenn pfad leer oder Datei fehlt, werden Defaults geliefert.
