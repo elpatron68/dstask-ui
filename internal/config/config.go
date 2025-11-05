@@ -7,6 +7,7 @@ import (
     "strconv"
     "strings"
 
+    applog "github.com/elpatron68/dstask-ui/internal/log"
     "gopkg.in/yaml.v3"
 )
 
@@ -51,23 +52,57 @@ func defaultDstaskBin() string {
 
 // Load lädt eine optionale YAML-Datei. Wenn pfad leer oder Datei fehlt, werden Defaults geliefert.
 func Load(path string) (*Config, error) {
-	cfg := Default()
-	if path == "" {
-		path = "config.yaml"
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			applyEnvOverrides(cfg)
-			return cfg, nil
-		}
-		return nil, err
-	}
-	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return nil, err
-	}
-	applyEnvOverrides(cfg)
-	return cfg, nil
+    cfg := Default()
+
+    // Standardpfad: <HOME>/.dstask-ui/config.yaml (Windows: %USERPROFILE%\.dstask-ui)
+    if path == "" {
+        home, err := os.UserHomeDir()
+        if err == nil && home != "" {
+            baseDir := filepath.Join(home, ".dstask-ui")
+            if err := os.MkdirAll(baseDir, 0755); err == nil {
+                path = filepath.Join(baseDir, "config.yaml")
+            } else {
+                // Fallback: Arbeitsverzeichnis
+                path = "config.yaml"
+            }
+        } else {
+            // Fallback: Arbeitsverzeichnis
+            path = "config.yaml"
+        }
+    }
+
+    data, err := os.ReadFile(path)
+    if err != nil {
+        if errors.Is(err, os.ErrNotExist) {
+            // Datei existiert nicht: Defaults anwenden und Datei anlegen
+            applyEnvOverrides(cfg)
+            if err := writeDefaultConfigFile(path, cfg); err != nil {
+                return nil, err
+            }
+            applog.Infof("Konfigurationsdatei wurde mit Default-Werten angelegt: %s", path)
+            applog.Infof("Hinweis: Passen Sie bei Bedarf `repos` und weitere Felder in %s an.", path)
+            return cfg, nil
+        }
+        return nil, err
+    }
+    if err := yaml.Unmarshal(data, cfg); err != nil {
+        return nil, err
+    }
+    applyEnvOverrides(cfg)
+    return cfg, nil
+}
+
+func writeDefaultConfigFile(path string, cfg *Config) error {
+    // Elternverzeichnis sicherstellen
+    if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+        return err
+    }
+    // YAML schreiben
+    out, err := yaml.Marshal(cfg)
+    if err != nil {
+        return err
+    }
+    return os.WriteFile(path, out, 0644)
 }
 
 func applyEnvOverrides(cfg *Config) {

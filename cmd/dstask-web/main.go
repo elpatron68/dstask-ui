@@ -16,15 +16,8 @@ func main() {
 	username := getenvDefault("DSTWEB_USER", "admin")
 	password := getenvDefault("DSTWEB_PASS", "admin")
 
-	// Config laden (optional config.yaml)
-	// Versuche zuerst im aktuellen Verzeichnis, dann im Root-Verzeichnis (zwei Ebenen nach oben)
-	configPath := ""
-	if _, err := os.Stat("config.yaml"); err == nil {
-		configPath = "config.yaml"
-	} else if _, err := os.Stat("../../config.yaml"); err == nil {
-		configPath = "../../config.yaml"
-	}
-	cfg, err := config.Load(configPath)
+    // Config laden aus <HOME>/.dstask-ui/config.yaml; wenn fehlend, wird sie mit Defaults erzeugt
+    cfg, err := config.Load("")
 	if err != nil {
 		stdlog.Fatalf("config error: %v", err)
 	}
