@@ -3007,25 +3007,6 @@ func urlQueryEscape(s string) string {
 }
 func urlQueryUnescape(s string) string { return s }
 
-// parseTaskAction extrahiert ID und Aktion aus Pfaden wie /tasks/123/start
-func parseTaskAction(path string) (id, action string) {
-	// TrimPrefix
-	if !strings.HasPrefix(path, "/tasks/") {
-		return "", ""
-	}
-	rest := strings.TrimPrefix(path, "/tasks/")
-	parts := strings.Split(rest, "/")
-	if len(parts) < 2 {
-		return "", ""
-	}
-	id = strings.TrimSpace(parts[0])
-	action = strings.TrimSpace(parts[1])
-	if id == "" || action == "" {
-		return "", ""
-	}
-	return id, action
-}
-
 func (s *Server) Handler() http.Handler {
 	// Basic Auth für alle außer /healthz
 	protected := http.NewServeMux()
