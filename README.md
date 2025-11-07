@@ -81,6 +81,13 @@ export DSTWEB_PASS=admin
 # Browser: http://localhost:8080/
 ```
 
+Once signed in you can open **Tasks → New** to create a task and attach a radio stream:
+
+1. Choose `music_type = radio` in the music fieldset.
+2. Enter a station name and click **Search** to query the Radio Browser directory (first 20 matches are shown).
+3. Pick a result to fill the URL automatically; submitting the form stores the mapping.
+4. Starting the task triggers playback in the floating player (bottom-right). Volume & mute state persist per task across sessions.
+
 ### First-start behavior (setup flow)
 - **dstask binary check**: The binary is taken from `config.yaml` or discovered via PATH. If not found, the server opens the releases page and returns an OS-specific instruction message to install/place `dstask` (see Troubleshooting).
 - **`.dstask` repo check**: For each user (per `repos`) we check whether the `.dstask` directory exists.
@@ -124,6 +131,7 @@ git -C "$HOME/.dstask" branch --set-upstream-to=origin/main main
 - Rich HTML tables (`?html=1`) with sortable columns, status/priority badges, tag pills, and overdue highlighting
 - Recent dstask commands footer with timestamps (configurable, per-user)
 - Enhanced New Task form: select existing project or enter new, pick tags or add new, date picker for due
+- **Built-in stream player**: start radio streams tied to tasks, with per-task volume & mute persistence and browser playback controls
 - Flash messages for success/error on actions
 - Batch actions with multi-select (start/stop/done/remove/note)
 - **Due filters**: Server-side filtering by due date (before/after/on/overdue) in HTML views
@@ -180,6 +188,8 @@ $env:DSTWEB_PASS='admin'
 ./bin/dstask-web.exe
 # Browser: http://localhost:8080/
 ```
+
+Streams are always proxied through `/music/proxy`, so browsers receive audio from the same origin and difficult referer/CORS requirements of public radio services are handled by the server.
 
 ## Configuration (`config.yaml`)
 
@@ -285,6 +295,8 @@ git branch --set-upstream-to=<remote>/<branch> master
 - `GET /tasks/{id}/open` (display URLs extracted from task summary/notes)
 - `/tasks/action` (form UI), `POST /tasks/submit`
 - `POST /tasks/batch` (batch actions for selected IDs)
+- `/music/proxy?url=…` (server-side audio proxy with referer passthrough)
+- `/music/tasks/{id}` (GET latest mapping, PUT updates from stream player)
 - `/templates` (GET list, POST create), `/templates/new` (form), `/templates/{id}/edit` (GET form, POST update), `POST /templates/{id}/delete`
 - `POST /undo` (roll back last action)
 - `/version`, `/sync` (GET info, POST run)

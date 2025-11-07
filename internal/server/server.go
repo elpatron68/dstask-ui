@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -505,107 +504,17 @@ func (s *Server) routes() {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = io.Copy(w, resp.Body)
 	})
-	// Music: playlist (M3U) for folder under user's HOME/.dstask scope
-	s.mux.HandleFunc("/music/playlist", func(w http.ResponseWriter, r *http.Request) {
-		username, _ := auth.UsernameFromRequest(r)
-		raw := strings.TrimSpace(r.URL.Query().Get("path"))
-		if raw == "" {
-			http.Error(w, "missing path", http.StatusBadRequest)
-			return
-		}
-		// Resolve base dir
-		home, ok := config.ResolveHomeForUsername(s.cfg, username)
-		if !ok || home == "" {
-			if h, err := os.UserHomeDir(); err == nil && h != "" {
-				home = h
-			}
-		}
-		if home == "" {
-			http.Error(w, "home unknown", http.StatusBadRequest)
-			return
-		}
-		base := home
-		if filepath.Base(base) != ".dstask" {
-			base = filepath.Join(home, ".dstask")
-		}
-		// Canonicalize
-		target := raw
-		if !filepath.IsAbs(target) {
-			target = filepath.Join(base, target)
-		}
-		clean := filepath.Clean(target)
-		// Ensure within HOME/.dstask subtree
-		if !strings.HasPrefix(clean+string(filepath.Separator), base+string(filepath.Separator)) {
-			http.Error(w, "path outside allowed root", http.StatusForbidden)
-			return
-		}
-		entries, err := os.ReadDir(clean)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		// Build simple M3U with relative URLs to a file-serving endpoint (future) or file:// cannot be used in browser.
-		// For MVP, emit M3U with names only; UI will hit /music/playlist again to rotate files (not streaming).
-		var b strings.Builder
-		b.WriteString("#EXTM3U\n")
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			name := e.Name()
-			lower := strings.ToLower(name)
-			if !(strings.HasSuffix(lower, ".mp3") || strings.HasSuffix(lower, ".m4a") || strings.HasSuffix(lower, ".ogg")) {
-				continue
-			}
-			// For now, expose relative download via /music/file?path=...
-			filePath := filepath.Join(clean, name)
-			rel := strings.TrimPrefix(filePath, base)
-			u := url.URL{Path: "/music/file", RawQuery: url.Values{"path": {rel}}.Encode()}
-			b.WriteString(u.String())
-			b.WriteString("\n")
-		}
-		w.Header().Set("Content-Type", "audio/x-mpegurl; charset=utf-8")
-		_, _ = w.Write([]byte(b.String()))
-	})
-	// Minimal file serving for audio under HOME/.dstask
-	s.mux.HandleFunc("/music/file", func(w http.ResponseWriter, r *http.Request) {
-		username, _ := auth.UsernameFromRequest(r)
-		rel := strings.TrimSpace(r.URL.Query().Get("path"))
-		if rel == "" {
-			http.Error(w, "missing path", http.StatusBadRequest)
-			return
-		}
-		home, ok := config.ResolveHomeForUsername(s.cfg, username)
-		if !ok || home == "" {
-			if h, err := os.UserHomeDir(); err == nil && h != "" {
-				home = h
-			}
-		}
-		if home == "" {
-			http.Error(w, "home unknown", http.StatusBadRequest)
-			return
-		}
-		base := home
-		if filepath.Base(base) != ".dstask" {
-			base = filepath.Join(home, ".dstask")
-		}
-		clean := filepath.Clean(filepath.Join(base, rel))
-		if !strings.HasPrefix(clean+string(filepath.Separator), base+string(filepath.Separator)) {
-			http.Error(w, "path outside allowed root", http.StatusForbidden)
-			return
-		}
-		f, err := os.Open(clean)
-		if err != nil {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
-		defer f.Close()
-		// naive content-type
-		if strings.HasSuffix(strings.ToLower(clean), ".mp3") {
-			w.Header().Set("Content-Type", "audio/mpeg")
-		}
-		http.ServeContent(w, r, filepath.Base(clean), time.Now(), f)
-	})
+	// TODO(music): Lokale MP3-Wiedergabe später reaktivieren. Routen vorübergehend deaktiviert.
+	/*
+		// Music: playlist (M3U) for folder under user's HOME/.dstask scope
+		s.mux.HandleFunc("/music/playlist", func(w http.ResponseWriter, r *http.Request) {
+			...
+		})
+		// Minimal file serving for audio under HOME/.dstask
+		s.mux.HandleFunc("/music/file", func(w http.ResponseWriter, r *http.Request) {
+			...
+		})
+	*/
 
 	// Simple streaming proxy to improve compatibility (e.g., AAC/MP3/ICY/CORS)
 	s.mux.HandleFunc("/music/proxy", func(w http.ResponseWriter, r *http.Request) {
@@ -1954,6 +1863,51 @@ func (s *Server) routes() {
       {{range .Templates}}<option value="{{index . "id"}}" {{if eq $.SelectedTemplate (index . "id")}}selected{{end}}>#{{index . "id"}}: {{index . "summary"}}</option>{{end}}
     </select>
   </div>
+  <fieldset style="margin-top:12px;">
+    <legend>Music (radio station)</legend>
+    <div>
+      <label>Type:
+        <select name="music_type">
+          <option value="">(none)</option>
+          <option value="radio">radio</option>
+        </select>
+      </label>
+    </div>
+    <div style="margin-top:6px;"><label>Name: <input name="music_name" placeholder="Station label"><button type="button" id="new_music_name_search" style="margin-left:6px;">Search</button></label></div>
+    <div style="margin-top:6px;"><label>Stream URL: <input name="music_url" style="width:60%" placeholder="https://…"></label></div>
+    <ul id="new_music_search_results" style="max-height:160px; overflow:auto; border:1px solid #ddd; padding:6px; margin-top:6px;"></ul>
+  </fieldset>
+  <script>
+  (function(){
+    var typeSel = document.querySelector('select[name="music_type"]');
+    var nameInp = document.querySelector('input[name="music_name"]');
+    var urlInp  = document.querySelector('input[name="music_url"]');
+    var btn     = document.getElementById('new_music_name_search');
+    var ul      = document.getElementById('new_music_search_results');
+    if(!btn || !nameInp) return;
+    btn.addEventListener('click', function(){
+      if(typeSel && typeSel.value !== 'radio') return;
+      var q = (nameInp.value||'').trim(); if(!q) return;
+      ul.textContent = 'Searching…';
+      fetch('/music/search?q='+encodeURIComponent(q))
+        .then(function(r){ return r.json(); })
+        .then(function(arr){
+          ul.innerHTML = '';
+          (arr||[]).forEach(function(st){
+            var li = document.createElement('li');
+            li.style.cursor='pointer';
+            var nm = st.name || '(no name)';
+            var u  = st.url_resolved || st.url || '';
+            li.textContent = nm + ' — ' + u;
+            li.onclick = function(){ nameInp.value = nm; if(u) urlInp.value = u; };
+            ul.appendChild(li);
+          });
+          if(!ul.childElementCount){ ul.textContent = 'No results'; }
+        })
+        .catch(function(){ ul.textContent = 'Search failed'; });
+    });
+  })();
+  </script>
   <div style="margin-top:8px;"><button type="submit">Create</button></div>
  </form>
         `)
@@ -2358,14 +2312,11 @@ func (s *Server) routes() {
         <select name="music_type">
           <option value="">(none)</option>
           <option value="radio" {{if eq .MusicType "radio"}}selected{{end}}>radio</option>
-          <option value="folder" {{if eq .MusicType "folder"}}selected{{end}}>folder</option>
         </select>
       </label>
     </div>
     <div style="margin-top:6px;"><label>Name: <input name="music_name" value="{{.MusicName}}" placeholder="Station or folder label"><button type="button" id="music_name_search" style="margin-left:6px;">Search</button></label></div>
     <div style="margin-top:6px;"><label>Stream URL: <input name="music_url" value="{{.MusicURL}}" style="width:60%" placeholder="https://… (for type=radio)"></label></div>
-    <div style="margin-top:6px;"><label>Folder path: <input name="music_path" value="{{.MusicPath}}" style="width:60%" placeholder="relative to ~/.dstask or absolute under HOME (for type=folder)"></label></div>
-    <div style="margin-top:6px;color:#6a737d;font-size:12px;">Hint: You can search stations at <a href="/music/assign" title="Assign music">/music/assign</a> and copy the resolved URL.</div>
     <ul id="music_search_results" style="max-height:160px; overflow:auto; border:1px solid #ddd; padding:6px; margin-top:6px;"></ul>
   </fieldset>
   <script>
@@ -2898,72 +2849,6 @@ git push -u origin master</pre>`
 		}
 		s.setFlash(w, "success", "Remote konfiguriert. Du kannst jetzt Sync ausführen.")
 		http.Redirect(w, r, "/", http.StatusSeeOther)
-	})
-
-	// Simple assign UI: radio search and save mapping
-	s.mux.HandleFunc("/music/assign", func(w http.ResponseWriter, r *http.Request) {
-		username, _ := auth.UsernameFromRequest(r)
-		if r.Method == http.MethodPost {
-			if err := r.ParseForm(); err != nil {
-				http.Error(w, "invalid form", http.StatusBadRequest)
-				return
-			}
-			taskID := strings.TrimSpace(r.FormValue("id"))
-			name := strings.TrimSpace(r.FormValue("name"))
-			urlv := strings.TrimSpace(r.FormValue("url"))
-			if taskID == "" || urlv == "" {
-				http.Error(w, "id/url required", http.StatusBadRequest)
-				return
-			}
-			m, _, err := music.LoadForUser(s.cfg, username)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			if m.Tasks == nil {
-				m.Tasks = map[string]music.TaskMusic{}
-			}
-			m.Tasks[taskID] = music.TaskMusic{Type: "radio", Name: name, URL: urlv}
-			if _, err := music.SaveForUser(s.cfg, username, m); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
-			return
-		}
-		// GET: render minimal form
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		t := template.Must(s.layoutTpl.Clone())
-		_, _ = t.New("content").Parse(`<h2>Assign music to task</h2>
-<form method="post">
-  <div><label>Task ID <input name="id" required placeholder="123"/></label></div>
-  <div style="margin-top:8px;"><label>Search station <input id="q" placeholder="name"/></label> <button id="search">Search</button></div>
-  <ul id="results"></ul>
-  <div style="margin-top:8px;"><label>Chosen name <input name="name" id="name"/></label></div>
-  <div style="margin-top:8px;"><label>Stream URL <input name="url" id="url" required style="width:60%"/></label></div>
-  <div style="margin-top:12px;"><button type="submit">Save</button> <a href="/">cancel</a></div>
-</form>
-<script>
-document.getElementById('search').addEventListener('click', async (e)=>{
-  e.preventDefault();
-  const q = document.getElementById('q').value.trim();
-  if(!q) return;
-  const ul = document.getElementById('results'); ul.innerHTML='Searching...';
-  const res = await fetch('/music/search?q='+encodeURIComponent(q));
-  const arr = await res.json();
-  ul.innerHTML='';
-  (arr||[]).slice(0,20).forEach(st=>{
-    const li = document.createElement('li');
-    const name = st.name || '(no name)';
-    const url = st.url_resolved || st.url;
-    li.textContent = name + ' — ' + url;
-    li.style.cursor='pointer';
-    li.onclick = ()=>{ document.getElementById('name').value=name; document.getElementById('url').value=url; };
-    ul.appendChild(li);
-  });
-});
-</script>`)
-		_ = t.Execute(w, map[string]any{"Active": activeFromPath(r.URL.Path)})
 	})
 
 	// Remote klonen
