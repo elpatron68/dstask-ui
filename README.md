@@ -1,4 +1,6 @@
-# dstask-web + 🎵 (Web UI for dstask plus radio stream per task)
+# dstask-web + 🎵 
+
+## A lean Web UI for dstask plus radio stream player per task
 
 [![Build](https://github.com/elpatron68/dstask-ui/actions/workflows/ci.yml/badge.svg)](https://github.com/elpatron68/dstask-ui/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/elpatron68/dstask-ui/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/elpatron68/dstask-ui/actions/workflows/codeql-analysis.yml)
