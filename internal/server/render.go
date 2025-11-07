@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/elpatron68/dstask-ui/internal/auth"
+	"github.com/elpatron68/dstask-ui/internal/music"
 )
 
 var idLineRe = regexp.MustCompile(`^\s*(\d+)\b`)
@@ -152,7 +153,13 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
 func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title string, rows []map[string]string) {
 	t := template.Must(s.layoutTpl.Clone())
 	// enrich rows with action flags and computed flags
-	rowsAny := make([]map[string]any, 0, len(rows))
+    rowsAny := make([]map[string]any, 0, len(rows))
+    // load per-user music map to flag tasks with stream linkage
+    username, _ := auth.UsernameFromRequest(r)
+    musicSet := map[string]struct{}{}
+    if m, _, err := music.LoadForUser(s.cfg, username); err == nil && m != nil && m.Tasks != nil {
+        for tid := range m.Tasks { musicSet[tid] = struct{}{} }
+    }
 	for _, m := range rows {
 		status := strings.ToLower(m["status"])
 		canStart := status == "pending" || status == "paused"
@@ -183,7 +190,10 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
 		if due, ok := m["due"]; ok {
 			mm["overdue"] = isOverdue(due)
 		}
-		rowsAny = append(rowsAny, mm)
+        if id, ok := m["id"]; ok {
+            if _, ok2 := musicSet[id]; ok2 { mm["hasMusic"] = true }
+        }
+        rowsAny = append(rowsAny, mm)
 	}
 	// sorting
 	sortKey := r.URL.Query().Get("sort")
@@ -242,7 +252,7 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
   {{range .Rows}}
     <tr>
       <td><input type="checkbox" name="ids" value="{{index . "id"}}" form="batchForm"/></td>
-      <td>{{index . "id"}}{{if .hasNotes}} 
+      <td>{{index . "id"}}{{if .hasMusic}} <span title="Music assigned">🎵</span>{{end}}{{if .hasNotes}} 
         <span class="hovercard"><span class="label" title="Show notes">📝</span>
           <div class="card"><div class="notes-content">{{renderMarkdown (index . "notes")}}</div></div>
         </span>

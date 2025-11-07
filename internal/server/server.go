@@ -1,20 +1,24 @@
 package server
 
 import (
-    "fmt"
-    "html/template"
-    "os"
-    "net/http"
-    "net/url"
-    "strings"
-    "time"
+	"bufio"
+	"fmt"
+	"html/template"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
 
-    "github.com/elpatron68/dstask-ui/internal/auth"
-    "github.com/elpatron68/dstask-ui/internal/config"
-    "github.com/elpatron68/dstask-ui/internal/dstask"
-    applog "github.com/elpatron68/dstask-ui/internal/log"
-    "github.com/elpatron68/dstask-ui/internal/ui"
-    "github.com/elpatron68/dstask-ui/internal/music"
+	"github.com/elpatron68/dstask-ui/internal/auth"
+	"github.com/elpatron68/dstask-ui/internal/config"
+	"github.com/elpatron68/dstask-ui/internal/dstask"
+	applog "github.com/elpatron68/dstask-ui/internal/log"
+	"github.com/elpatron68/dstask-ui/internal/music"
+	"github.com/elpatron68/dstask-ui/internal/ui"
 )
 
 type Server struct {
@@ -50,7 +54,7 @@ func NewServerWithConfig(userStore auth.UserStore, cfg *config.Config) *Server {
 		"linkifyURLs":    linkifyURLs,
 		"renderMarkdown": renderMarkdown,
 	})
-    s.layoutTpl = template.Must(baseTpl.Parse(`<!doctype html><html><head><meta charset="utf-8"><title>dstask</title><link rel="icon" href="/favicon.svg" type="image/svg+xml">
+	s.layoutTpl = template.Must(baseTpl.Parse(`<!doctype html><html><head><meta charset="utf-8"><title>dstask</title><link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;margin:16px}
 nav a{padding:6px 10px; text-decoration:none; color:#0366d6; border-radius:4px}
@@ -132,24 +136,223 @@ table, th, td, table pre {font-size:13px}
 <script>
 (function(){
   const audio = new Audio();
-  audio.preload = 'none';
+  audio.preload = 'auto';
   let current = null;
-  const elPlay = document.getElementById('mp-play');
-  const elMute = document.getElementById('mp-mute');
-  const elVol = document.getElementById('mp-vol');
+  const log = (...a)=>{ try{ console.log('[music]', ...a); } catch(e){} };
+  const elPlay  = document.getElementById('mp-play');
+  const elMute  = document.getElementById('mp-mute');
+  const elVol   = document.getElementById('mp-vol');
   const elLabel = document.getElementById('mp-label');
-  elPlay.addEventListener('click', ()=>{ if (audio.paused) audio.play(); else audio.pause(); });
-  elMute.addEventListener('click', ()=>{ audio.muted = !audio.muted; });
-  elVol.addEventListener('input', ()=>{ audio.volume = parseFloat(elVol.value||'0.8'); });
+  let persistCurrent = function(){ /* noop until stream active */ };
+
+  function clampVolume(v){
+    if (typeof v !== 'number' || isNaN(v)) { return null; }
+    if (v < 0) v = 0;
+    if (v > 1) v = 1;
+    return v;
+  }
+
+  function volumeStorageKey(id){
+    if (id) return 'dstask-music-vol:'+id;
+    if (current && current.url) return 'dstask-music-url:'+current.url;
+    return 'dstask-music-default';
+  }
+
+  function mutedStorageKey(id){
+    return volumeStorageKey(id)+':muted';
+  }
+
+  function applyVolume(v, reason){
+    const cv = clampVolume(typeof v === 'string' ? parseFloat(v) : v);
+    if (cv === null) return;
+    audio.volume = cv;
+    if (elVol) { elVol.value = cv.toFixed(2); }
+    if (current) {
+      current.volume = cv;
+      try { localStorage.setItem(volumeStorageKey(current.id), String(cv)); } catch(_){ }
+    }
+    log('volume applied', cv, reason||'');
+  }
+
+  function applyMuted(val){
+    if (typeof val === 'boolean') {
+      audio.muted = val;
+      if (current) {
+        current.muted = val;
+        try { localStorage.setItem(mutedStorageKey(current.id), val ? '1' : '0'); } catch(_){ }
+      }
+      log('muted applied', val);
+    }
+  }
+
+  function applyStoredMuted(id){
+    try {
+      const storedMuted = localStorage.getItem(mutedStorageKey(id));
+      if (storedMuted != null) {
+        applyMuted(storedMuted === '1');
+        return true;
+      }
+    } catch(_){ }
+    return false;
+  }
+
+  try {
+    const baseVol = localStorage.getItem(volumeStorageKey(''));
+    if (baseVol != null) {
+      applyVolume(baseVol, 'init');
+    } else if (elVol) {
+      elVol.value = parseFloat(elVol.value || '0.8').toFixed(2);
+    }
+  } catch(_){ }
+
+  function setSrcAndPlay(name, url, opts){
+    opts = opts || {};
+    current = {type:'radio', name, url, id: opts.id||'', volume: opts.vol, muted: opts.muted};
+    if (elLabel) elLabel.textContent = name || url;
+    // Immer über Proxy (mit Referer & Cache-Buster), da Quelle sonst 401/CORS liefern kann
+    try {
+      const orig = url;
+      // best-guess Referer je nach Stream-Host
+      let upstream;
+      try { upstream = new URL(orig); } catch(_) {}
+      let refererStr = window.location.href;
+      if (upstream && /(^|\.)rndfnk\.com$/i.test(upstream.hostname)) {
+        refererStr = 'https://www.deutschlandfunk.de/';
+      }
+      url = '/music/proxy?url=' + encodeURIComponent(orig) + '&referer=' + encodeURIComponent(refererStr) + '&_ts=' + Date.now();
+    } catch(e) { /* ignore */ }
+    log('set src', url);
+    try { audio.pause(); } catch(e){}
+    audio.src = url;
+    // helper to persist current settings for this task
+    persistCurrent = (reason)=>{
+      if (!(current && current.id)) {
+        log('persist skip', reason, 'no current id');
+        return;
+      }
+      const payload = { type: 'radio', name: current.name||'', url: current.url||'', volume: (typeof audio.volume==='number'?audio.volume:undefined), muted: !!audio.muted };
+      log('persist', reason, 'id=', current.id, payload);
+      fetch('/music/tasks/' + encodeURIComponent(current.id), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(payload) })
+        .then(()=>{
+          log('persist ok');
+          if (current) {
+            if (typeof payload.volume === 'number') {
+              current.volume = payload.volume;
+              try { localStorage.setItem(volumeStorageKey(current.id), String(payload.volume)); } catch(_){ }
+            }
+            current.muted = !!payload.muted;
+            try { localStorage.setItem(mutedStorageKey(current.id), payload.muted ? '1' : '0'); } catch(_){ }
+          }
+        })
+        .catch(e=>log('persist failed', e));
+    };
+
+    // apply persisted volume/muted if provided
+    let appliedVolume = false;
+    if (typeof current.volume === 'number' && !isNaN(current.volume)) {
+      applyVolume(current.volume, 'opts');
+      appliedVolume = true;
+    }
+    if (!appliedVolume) {
+      try {
+        const stored = localStorage.getItem(volumeStorageKey(current.id));
+        if (stored != null) {
+          applyVolume(stored, 'localStorage');
+          appliedVolume = true;
+        }
+      } catch(_){ }
+    }
+    if (!appliedVolume && current && current.id) {
+      fetch('/music/tasks/' + encodeURIComponent(current.id), { credentials: 'same-origin' })
+        .then(res=>{ if (!res.ok) throw new Error('status '+res.status); return res.json(); })
+        .then(data=>{
+          if (!(current && data && current.id === data.id)) return;
+          if (typeof data.volume === 'number') {
+            applyVolume(data.volume, 'fetch');
+          }
+          if (typeof data.muted === 'boolean') {
+            applyMuted(data.muted);
+          } else {
+            applyStoredMuted(current.id);
+          }
+        })
+        .catch(err=>log('volume fetch failed', err));
+    } else {
+      if (current) { applyStoredMuted(current.id); }
+    }
+    if (typeof current.muted !== 'boolean' && current) {
+      applyStoredMuted(current.id);
+    }
+    if (typeof current.muted === 'boolean') {
+      applyMuted(current.muted);
+    }
+    audio.load();
+    // persist initial application so it's stored even ohne Slider-Interaktion
+    persistCurrent('onStart');
+    // try to play with muted first to satisfy autoplay
+    audio.muted = true;
+    const p = audio.play();
+    if (p && typeof p.then === 'function') {
+      p.then(()=>{
+        log('play() resolved; unmuting soon');
+        setTimeout(()=>{ audio.muted = false; log('unmuted'); }, 600);
+      }).catch(err=>{
+        log('play() blocked (autoplay?):', err);
+        if (elLabel) elLabel.textContent = (name||url) + ' (click ▶️ to play)';
+      });
+    }
+    // watchdog: if stuck in waiting, retry once
+    let checks = 0;
+    const iv = setInterval(()=>{
+      checks++;
+      log('state', 'network=', audio.networkState, 'ready=', audio.readyState);
+      if (!audio.paused && audio.readyState >= 3) { // HAVE_FUTURE_DATA
+        clearInterval(iv)
+        return;
+      }
+      if (checks === 6 && audio.readyState < 2) { // after ~3s
+        log('retry load() after waiting…');
+        try { audio.load(); audio.play().catch(()=>{}); } catch(e){}
+        clearInterval(iv);
+      }
+    }, 500);
+  }
+
+  // Controls
+  elPlay && elPlay.addEventListener('click', ()=>{
+    if (audio.paused) { log('play click'); audio.play().catch(e=>log('play rejected', e)); }
+    else { log('pause click'); audio.pause(); }
+  });
+  elMute && elMute.addEventListener('click', ()=>{ audio.muted = !audio.muted; log('mute', audio.muted); persistCurrent('muteClick'); });
+  let volSaveTimer = null;
+  function onVolumeInput(){ const v = parseFloat(elVol.value||'0.8');
+    applyVolume(v, 'slider');
+    log('volume', v);
+    if (volSaveTimer) clearTimeout(volSaveTimer);
+    volSaveTimer = setTimeout(()=>{ persistCurrent('volumeChange'); }, 300);
+  }
+  elVol && elVol.addEventListener('input', onVolumeInput);
+  elVol && elVol.addEventListener('change', onVolumeInput);
+
+  // Media events
+  audio.addEventListener('play',    ()=>log('event: play'));
+  audio.addEventListener('pause',   ()=>log('event: pause'));
+  audio.addEventListener('canplay', ()=>{ log('event: canplay'); if (audio.paused) { audio.play().catch(()=>{}); } });
+  audio.addEventListener('playing', ()=>log('event: playing'));
+  audio.addEventListener('waiting', ()=>{ log('event: waiting'); /* try nudging play */ if (audio.src) { audio.play().catch(()=>{}); } });
+  audio.addEventListener('stalled', ()=>log('event: stalled'));
+  audio.addEventListener('error',   ()=>{ const e=audio.error; log('event: error', e && (e.code+':'+e.message)); });
+  audio.addEventListener('volumechange', ()=>{
+    if (!current) return;
+    try { localStorage.setItem(volumeStorageKey(current.id), String(audio.volume)); } catch(_){ }
+    try { localStorage.setItem(mutedStorageKey(current.id), audio.muted ? '1' : '0'); } catch(_){ }
+  });
+
+  // API for server-driven start/stop
   window.dstaskMusic = {
-    playRadio: function(name, url){
-      current = {type:'radio', name, url};
-      elLabel.textContent = name||url;
-      audio.src = url;
-      audio.play().catch(()=>{});
-    },
-    stop: function(){ audio.pause(); audio.currentTime = 0; },
-    setVolume: function(v){ audio.volume = v; elVol.value = String(v); },
+    playRadio: (name, url, opts)=> setSrcAndPlay(name, url, opts),
+    stop: ()=>{ log('stop'); try{ audio.pause(); }catch(e){}; audio.currentTime = 0; current = null; persistCurrent = function(){}; },
+    setVolume: (v)=>{ applyVolume(parseFloat(v), 'api'); log('set volume', v); }
   };
 })();
 </script>
@@ -179,17 +382,84 @@ table, th, td, table pre {font-size:13px}
 <script>
 // Read flash content to control music if present
 (function(){
-  var el = document.querySelector('.flash.info');
-  if(!el) return;
-  var t = el.textContent || '';
-  if(t.indexOf('__MUSIC_START__')===0){
-    var p = t.replace('__MUSIC_START__','');
-    var i = p.indexOf('|');
-    var name = i>=0 ? p.slice(0,i) : '';
-    var url = i>=0 ? p.slice(i+1) : '';
-    if(window.dstaskMusic && url){ window.dstaskMusic.playRadio(name,url); }
-  } else if(t.indexOf('__MUSIC_STOP__')===0){
-    if(window.dstaskMusic){ window.dstaskMusic.stop(); }
+  const log = (...a)=>{ try{ console.log('[flash]', ...a); } catch(e){} };
+  function tryProcessFlash(){
+    var el = document.querySelector('.flash');
+    if(!el) { log('no .flash element found'); return false; }
+    var t = el.textContent || el.innerText || '';
+    log('flash text:', t.substring(0, 200));
+    var idx = t.indexOf('__MUSIC_START__');
+    if(idx >= 0){
+      var p = t.slice(idx).replace('__MUSIC_START__','');
+      var i = p.indexOf('|');
+      var name = '';
+      var url = '';
+      var id = '';
+      var vol = undefined;
+      var muted = undefined;
+      if(i >= 0){
+        name = p.slice(0,i).trim();
+        var rest = p.slice(i+1).trim();
+        // split rest on '|' for k=v pairs
+        var parts = rest.split('|');
+        url = (parts.shift()||'').trim();
+        parts.forEach(function(seg){
+          var eq = seg.indexOf('=');
+          var k = eq>=0 ? seg.slice(0,eq) : seg;
+          var v = eq>=0 ? seg.slice(eq+1) : '';
+          k = (k||'').trim().toLowerCase(); v = (v||'').trim();
+          if (k === 'id') id = v;
+          else if (k === 'vol') { var f = parseFloat(v); if (!isNaN(f)) vol = f; }
+          else if (k === 'muted') { muted = (v === '1' || v === 'true'); }
+        });
+      } else {
+        // Fallback: finde URL-Beginn über http(s)://
+        var h = p.indexOf('http://');
+        if (h < 0) h = p.indexOf('https://');
+        if (h >= 0){
+          name = p.slice(0, h).replace(/[\s/\-]+$/,'').trim();
+          url = p.slice(h).trim();
+        }
+      }
+      // Remove trailing text after URL (e.g., "Task action applied")
+      if(url) {
+        var spaceIdx = url.indexOf(' ');
+        if(spaceIdx > 0) url = url.slice(0, spaceIdx);
+        var newlineIdx = url.indexOf('\n');
+        if(newlineIdx > 0) url = url.slice(0, newlineIdx);
+      }
+      log('parsed name:', name, 'url:', url.substring(0, 100), 'id:', id, 'vol:', vol, 'muted:', muted);
+      if(window.dstaskMusic && url){
+        log('calling playRadio');
+        window.dstaskMusic.playRadio(name, url, { id: id, vol: vol, muted: muted });
+        return true;
+      } else {
+        log('dstaskMusic not available yet');
+        return false;
+      }
+    }
+    var idx2 = t.indexOf('__MUSIC_STOP__');
+    if(idx2 >= 0){
+      if(window.dstaskMusic){
+        log('calling stop');
+        window.dstaskMusic.stop();
+        return true;
+      } else {
+        log('dstaskMusic not available for stop');
+        return false;
+      }
+    }
+    return false;
+  }
+  // Try immediately, then retry if dstaskMusic not ready
+  if(!tryProcessFlash()){
+    var retries = 0;
+    var iv = setInterval(function(){
+      retries++;
+      if(tryProcessFlash() || retries >= 50){ // bis zu 5s warten
+        clearInterval(iv);
+      }
+    }, 100);
   }
 })();
 </script>
@@ -200,111 +470,305 @@ table, th, td, table pre {font-size:13px}
 }
 
 func (s *Server) routes() {
-    // Favicon
-    s.mux.HandleFunc("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
-        _, _ = w.Write([]byte(faviconSVG))
-    })
-    s.mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
-        http.Redirect(w, r, "/favicon.svg", http.StatusMovedPermanently)
-    })
-    // Music: search proxy to Radio Browser
-    s.mux.HandleFunc("/music/search", func(w http.ResponseWriter, r *http.Request) {
-        q := strings.TrimSpace(r.URL.Query().Get("q"))
-        if q == "" {
-            http.Error(w, "missing q", http.StatusBadRequest)
-            return
-        }
-        u := &url.URL{Scheme: "https", Host: "de2.api.radio-browser.info", Path: "/json/stations/search"}
-        params := url.Values{}
-        params.Set("name", q)
-        params.Set("limit", "20")
-        u.RawQuery = params.Encode()
-        req, _ := http.NewRequest(http.MethodGet, u.String(), nil)
-        req.Header.Set("User-Agent", "dstask-web/0.1.5")
-        resp, err := http.DefaultClient.Do(req)
-        if err != nil {
-            http.Error(w, err.Error(), http.StatusBadGateway)
-            return
-        }
-        defer resp.Body.Close()
-        if resp.StatusCode != http.StatusOK {
-            http.Error(w, "radio browser error", http.StatusBadGateway)
-            return
-        }
-        w.Header().Set("Content-Type", "application/json; charset=utf-8")
-        _, _ = io.Copy(w, resp.Body)
-    })
-    // Music: playlist (M3U) for folder under user's HOME/.dstask scope
-    s.mux.HandleFunc("/music/playlist", func(w http.ResponseWriter, r *http.Request) {
-        username, _ := auth.UsernameFromRequest(r)
-        raw := strings.TrimSpace(r.URL.Query().Get("path"))
-        if raw == "" {
-            http.Error(w, "missing path", http.StatusBadRequest)
-            return
-        }
-        // Resolve base dir
-        home, ok := config.ResolveHomeForUsername(s.cfg, username)
-        if !ok || home == "" {
-            if h, err := os.UserHomeDir(); err == nil && h != "" { home = h }
-        }
-        if home == "" { http.Error(w, "home unknown", http.StatusBadRequest); return }
-        base := home
-        if filepath.Base(base) != ".dstask" { base = filepath.Join(home, ".dstask") }
-        // Canonicalize
-        target := raw
-        if !filepath.IsAbs(target) { target = filepath.Join(base, target) }
-        clean := filepath.Clean(target)
-        // Ensure within HOME/.dstask subtree
-        if !strings.HasPrefix(clean+string(filepath.Separator), base+string(filepath.Separator)) {
-            http.Error(w, "path outside allowed root", http.StatusForbidden)
-            return
-        }
-        entries, err := os.ReadDir(clean)
-        if err != nil { http.Error(w, err.Error(), http.StatusBadRequest); return }
-        // Build simple M3U with relative URLs to a file-serving endpoint (future) or file:// cannot be used in browser.
-        // For MVP, emit M3U with names only; UI will hit /music/playlist again to rotate files (not streaming).
-        var b strings.Builder
-        b.WriteString("#EXTM3U\n")
-        for _, e := range entries {
-            if e.IsDir() { continue }
-            name := e.Name()
-            lower := strings.ToLower(name)
-            if !(strings.HasSuffix(lower, ".mp3") || strings.HasSuffix(lower, ".m4a") || strings.HasSuffix(lower, ".ogg")) {
-                continue
-            }
-            // For now, expose relative download via /music/file?path=...
-            filePath := filepath.Join(clean, name)
-            rel := strings.TrimPrefix(filePath, base)
-            u := url.URL{Path: "/music/file", RawQuery: url.Values{"path": {rel}}.Encode()}
-            b.WriteString(u.String())
-            b.WriteString("\n")
-        }
-        w.Header().Set("Content-Type", "audio/x-mpegurl; charset=utf-8")
-        _, _ = w.Write([]byte(b.String()))
-    })
-    // Minimal file serving for audio under HOME/.dstask
-    s.mux.HandleFunc("/music/file", func(w http.ResponseWriter, r *http.Request) {
-        username, _ := auth.UsernameFromRequest(r)
-        rel := strings.TrimSpace(r.URL.Query().Get("path"))
-        if rel == "" { http.Error(w, "missing path", http.StatusBadRequest); return }
-        home, ok := config.ResolveHomeForUsername(s.cfg, username)
-        if !ok || home == "" { if h, err := os.UserHomeDir(); err == nil && h != "" { home = h } }
-        if home == "" { http.Error(w, "home unknown", http.StatusBadRequest); return }
-        base := home
-        if filepath.Base(base) != ".dstask" { base = filepath.Join(home, ".dstask") }
-        clean := filepath.Clean(filepath.Join(base, rel))
-        if !strings.HasPrefix(clean+string(filepath.Separator), base+string(filepath.Separator)) {
-            http.Error(w, "path outside allowed root", http.StatusForbidden)
-            return
-        }
-        f, err := os.Open(clean)
-        if err != nil { http.Error(w, "not found", http.StatusNotFound); return }
-        defer f.Close()
-        // naive content-type
-        if strings.HasSuffix(strings.ToLower(clean), ".mp3") { w.Header().Set("Content-Type", "audio/mpeg") }
-        http.ServeContent(w, r, filepath.Base(clean), time.Now(), f)
-    })
+	// Favicon
+	s.mux.HandleFunc("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+		_, _ = w.Write([]byte(faviconSVG))
+	})
+	s.mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/favicon.svg", http.StatusMovedPermanently)
+	})
+	// Music: search proxy to Radio Browser
+	s.mux.HandleFunc("/music/search", func(w http.ResponseWriter, r *http.Request) {
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		if q == "" {
+			http.Error(w, "missing q", http.StatusBadRequest)
+			return
+		}
+		u := &url.URL{Scheme: "https", Host: "de2.api.radio-browser.info", Path: "/json/stations/search"}
+		params := url.Values{}
+		params.Set("name", q)
+		params.Set("limit", "20")
+		u.RawQuery = params.Encode()
+		req, _ := http.NewRequest(http.MethodGet, u.String(), nil)
+		req.Header.Set("User-Agent", "dstask-web/0.1.5")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			http.Error(w, "radio browser error", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = io.Copy(w, resp.Body)
+	})
+	// Music: playlist (M3U) for folder under user's HOME/.dstask scope
+	s.mux.HandleFunc("/music/playlist", func(w http.ResponseWriter, r *http.Request) {
+		username, _ := auth.UsernameFromRequest(r)
+		raw := strings.TrimSpace(r.URL.Query().Get("path"))
+		if raw == "" {
+			http.Error(w, "missing path", http.StatusBadRequest)
+			return
+		}
+		// Resolve base dir
+		home, ok := config.ResolveHomeForUsername(s.cfg, username)
+		if !ok || home == "" {
+			if h, err := os.UserHomeDir(); err == nil && h != "" {
+				home = h
+			}
+		}
+		if home == "" {
+			http.Error(w, "home unknown", http.StatusBadRequest)
+			return
+		}
+		base := home
+		if filepath.Base(base) != ".dstask" {
+			base = filepath.Join(home, ".dstask")
+		}
+		// Canonicalize
+		target := raw
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(base, target)
+		}
+		clean := filepath.Clean(target)
+		// Ensure within HOME/.dstask subtree
+		if !strings.HasPrefix(clean+string(filepath.Separator), base+string(filepath.Separator)) {
+			http.Error(w, "path outside allowed root", http.StatusForbidden)
+			return
+		}
+		entries, err := os.ReadDir(clean)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		// Build simple M3U with relative URLs to a file-serving endpoint (future) or file:// cannot be used in browser.
+		// For MVP, emit M3U with names only; UI will hit /music/playlist again to rotate files (not streaming).
+		var b strings.Builder
+		b.WriteString("#EXTM3U\n")
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			lower := strings.ToLower(name)
+			if !(strings.HasSuffix(lower, ".mp3") || strings.HasSuffix(lower, ".m4a") || strings.HasSuffix(lower, ".ogg")) {
+				continue
+			}
+			// For now, expose relative download via /music/file?path=...
+			filePath := filepath.Join(clean, name)
+			rel := strings.TrimPrefix(filePath, base)
+			u := url.URL{Path: "/music/file", RawQuery: url.Values{"path": {rel}}.Encode()}
+			b.WriteString(u.String())
+			b.WriteString("\n")
+		}
+		w.Header().Set("Content-Type", "audio/x-mpegurl; charset=utf-8")
+		_, _ = w.Write([]byte(b.String()))
+	})
+	// Minimal file serving for audio under HOME/.dstask
+	s.mux.HandleFunc("/music/file", func(w http.ResponseWriter, r *http.Request) {
+		username, _ := auth.UsernameFromRequest(r)
+		rel := strings.TrimSpace(r.URL.Query().Get("path"))
+		if rel == "" {
+			http.Error(w, "missing path", http.StatusBadRequest)
+			return
+		}
+		home, ok := config.ResolveHomeForUsername(s.cfg, username)
+		if !ok || home == "" {
+			if h, err := os.UserHomeDir(); err == nil && h != "" {
+				home = h
+			}
+		}
+		if home == "" {
+			http.Error(w, "home unknown", http.StatusBadRequest)
+			return
+		}
+		base := home
+		if filepath.Base(base) != ".dstask" {
+			base = filepath.Join(home, ".dstask")
+		}
+		clean := filepath.Clean(filepath.Join(base, rel))
+		if !strings.HasPrefix(clean+string(filepath.Separator), base+string(filepath.Separator)) {
+			http.Error(w, "path outside allowed root", http.StatusForbidden)
+			return
+		}
+		f, err := os.Open(clean)
+		if err != nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		defer f.Close()
+		// naive content-type
+		if strings.HasSuffix(strings.ToLower(clean), ".mp3") {
+			w.Header().Set("Content-Type", "audio/mpeg")
+		}
+		http.ServeContent(w, r, filepath.Base(clean), time.Now(), f)
+	})
+
+	// Simple streaming proxy to improve compatibility (e.g., AAC/MP3/ICY/CORS)
+	s.mux.HandleFunc("/music/proxy", func(w http.ResponseWriter, r *http.Request) {
+		// Robust extraction of the upstream URL: prefer full RawQuery tail after 'url='
+		// This handles unencoded '&' inside the upstream URL parameters (token/sid/etc.).
+		rq := r.URL.RawQuery
+		raw := strings.TrimSpace(r.URL.Query().Get("url"))
+		// If RawQuery tail was used previously, it may have included '&referer=' or other proxy params.
+		// Prefer the explicit query param value; only fall back if empty.
+		if raw == "" {
+			if i := strings.Index(rq, "url="); i >= 0 {
+				cand := rq[i+4:]
+				// Trim at next '&' to avoid appending proxy params like '&referer=' or '&_ts='
+				if j := strings.IndexByte(cand, '&'); j >= 0 {
+					cand = cand[:j]
+				}
+				if d, err := url.QueryUnescape(cand); err == nil && d != "" {
+					cand = d
+				}
+				raw = strings.TrimSpace(cand)
+			}
+		}
+		if raw == "" {
+			http.Error(w, "missing url", http.StatusBadRequest)
+			return
+		}
+		// sanitize accidental token tailings (e.g., "|id=1" appended) from client flash parsing
+		if k := strings.Index(raw, "|"); k >= 0 {
+			raw = raw[:k]
+		}
+		if k := strings.Index(raw, "/id="); k >= 0 {
+			raw = raw[:k]
+		}
+		u, err := url.Parse(raw)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+			http.Error(w, "invalid url", http.StatusBadRequest)
+			return
+		}
+		applog.Infof("/music/proxy fetch %s", raw)
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, raw, nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// Generic UA
+		req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; dstask-web)")
+		req.Header.Set("Accept", "audio/*, */*;q=0.5")
+		req.Header.Set("Cache-Control", "no-cache")
+		req.Header.Set("Pragma", "no-cache")
+		req.Header.Set("Accept-Encoding", "identity")
+		if al := r.Header.Get("Accept-Language"); al != "" {
+			req.Header.Set("Accept-Language", al)
+		}
+		if ua := r.Header.Get("User-Agent"); ua != "" {
+			req.Header.Set("User-Agent", ua)
+		}
+		// try to preserve client IP for geo/token backends
+		if xffVal := r.Header.Get("X-Forwarded-For"); xffVal != "" {
+			req.Header.Set("X-Forwarded-For", xffVal)
+		} else {
+			host := r.RemoteAddr
+			if i := strings.LastIndex(host, ":"); i > 0 {
+				host = host[:i]
+			}
+			req.Header.Set("X-Forwarded-For", host)
+		}
+		// Optional Referer passthrough for token-gated streams
+		referer := strings.TrimSpace(r.URL.Query().Get("referer"))
+		if referer == "" {
+			// Also try to extract from RawQuery if provided without encoding
+			rq := r.URL.RawQuery
+			if j := strings.Index(rq, "referer="); j >= 0 {
+				ref := rq[j+8:]
+				if d, err := url.QueryUnescape(ref); err == nil && d != "" {
+					referer = d
+				} else {
+					referer = ref
+				}
+			}
+		}
+		if referer != "" {
+			req.Header.Set("Referer", referer)
+		}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+
+		// Determine content type; fallback anhand Dateiendung
+		ct := resp.Header.Get("Content-Type")
+		if ct == "" {
+			lp := strings.ToLower(u.Path)
+			switch {
+			case strings.Contains(lp, ".aac"):
+				ct = "audio/aac"
+			case strings.Contains(lp, ".m4a") || strings.Contains(lp, ".mp4"):
+				ct = "audio/mp4"
+			default:
+				ct = "audio/mpeg"
+			}
+		}
+
+		// Response-Header setzen; Content-Length entfernen, damit Chunked-Streaming genutzt wird
+		w.Header().Set("Content-Type", ct)
+		if v := resp.Header.Get("Ice-Audio-Info"); v != "" {
+			w.Header().Set("Ice-Audio-Info", v)
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Del("Content-Length")
+		w.WriteHeader(resp.StatusCode)
+
+		// Chunked stream mit periodischem Flush
+		var total int64
+		if f, ok := w.(http.Flusher); ok {
+			buf := make([]byte, 32*1024)
+			bw := bufio.NewWriterSize(w, 64*1024)
+			lastFlush := time.Now()
+			bytesSinceFlush := 0
+			for {
+				n, er := resp.Body.Read(buf)
+				if n > 0 {
+					total += int64(n)
+					if _, ew := bw.Write(buf[:n]); ew != nil {
+						applog.Warnf("/music/proxy write error: %v (bytes_sent=%d)", ew, total)
+						return
+					}
+					bytesSinceFlush += n
+					if bytesSinceFlush >= 128*1024 || time.Since(lastFlush) >= 300*time.Millisecond {
+						if err := bw.Flush(); err != nil {
+							applog.Warnf("/music/proxy buffer flush error: %v (bytes_sent=%d)", err, total)
+							return
+						}
+						f.Flush()
+						bytesSinceFlush = 0
+						lastFlush = time.Now()
+					}
+				}
+				if er != nil {
+					if er != io.EOF {
+						applog.Warnf("/music/proxy stream error: %v (bytes_sent=%d)", er, total)
+					}
+					break
+				}
+			}
+			if err := bw.Flush(); err != nil {
+				applog.Warnf("/music/proxy final flush error: %v (bytes_sent=%d)", err, total)
+			} else {
+				f.Flush()
+			}
+		} else {
+			n, err := io.Copy(w, resp.Body)
+			total = n
+			if err != nil {
+				applog.Warnf("/music/proxy stream error: %v (bytes_sent=%d)", err, total)
+			}
+		}
+
+		applog.Infof("/music/proxy done %s status=%d bytes_sent=%d", raw, resp.StatusCode, total)
+	})
 	// Batch actions
 	s.mux.HandleFunc("/tasks/batch", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -378,80 +842,103 @@ func (s *Server) routes() {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ok"))
 	})
-    // Music map CRUD
-    s.mux.HandleFunc("/music/map", func(w http.ResponseWriter, r *http.Request) {
-        username, _ := auth.UsernameFromRequest(r)
-        switch r.Method {
-        case http.MethodGet:
-            m, _, err := music.LoadForUser(s.cfg, username)
-            if err != nil {
-                http.Error(w, err.Error(), http.StatusInternalServerError)
-                return
-            }
-            writeJSON(w, m)
-        case http.MethodPut:
-            var m music.Map
-            if err := jsonNewDecoder(r).Decode(&m); err != nil {
-                http.Error(w, "invalid json", http.StatusBadRequest)
-                return
-            }
-            if m.Version == 0 {
-                m.Version = 1
-            }
-            if m.Tasks == nil {
-                m.Tasks = map[string]music.TaskMusic{}
-            }
-            if _, err := music.SaveForUser(s.cfg, username, &m); err != nil {
-                http.Error(w, err.Error(), http.StatusInternalServerError)
-                return
-            }
-            writeJSON(w, map[string]any{"ok": true})
-        default:
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-        }
-    })
-    s.mux.HandleFunc("/music/tasks/", func(w http.ResponseWriter, r *http.Request) {
-        username, _ := auth.UsernameFromRequest(r)
-        id := strings.TrimPrefix(r.URL.Path, "/music/tasks/")
-        if id == "" {
-            http.Error(w, "missing id", http.StatusBadRequest)
-            return
-        }
-        m, path, err := music.LoadForUser(s.cfg, username)
-        if err != nil {
-            http.Error(w, err.Error(), http.StatusInternalServerError)
-            return
-        }
-        switch r.Method {
-        case http.MethodPut:
-            var tm music.TaskMusic
-            if err := jsonNewDecoder(r).Decode(&tm); err != nil {
-                http.Error(w, "invalid json", http.StatusBadRequest)
-                return
-            }
-            if m.Tasks == nil { m.Tasks = map[string]music.TaskMusic{} }
-            m.Tasks[id] = tm
-            if _, err := music.SaveForUser(s.cfg, username, m); err != nil {
-                http.Error(w, err.Error(), http.StatusInternalServerError)
-                return
-            }
-            writeJSON(w, map[string]any{"ok": true, "path": path})
-        case http.MethodDelete:
-            if m.Tasks != nil { delete(m.Tasks, id) }
-            if _, err := music.SaveForUser(s.cfg, username, m); err != nil {
-                http.Error(w, err.Error(), http.StatusInternalServerError)
-                return
-            }
-            writeJSON(w, map[string]any{"ok": true, "path": path})
-        default:
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-        }
-    })
+	// Music map CRUD
+	s.mux.HandleFunc("/music/map", func(w http.ResponseWriter, r *http.Request) {
+		username, _ := auth.UsernameFromRequest(r)
+		switch r.Method {
+		case http.MethodGet:
+			m, _, err := music.LoadForUser(s.cfg, username)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, m)
+		case http.MethodPut:
+			var m music.Map
+			if err := jsonNewDecoder(r).Decode(&m); err != nil {
+				http.Error(w, "invalid json", http.StatusBadRequest)
+				return
+			}
+			if m.Version == 0 {
+				m.Version = 1
+			}
+			if m.Tasks == nil {
+				m.Tasks = map[string]music.TaskMusic{}
+			}
+			if _, err := music.SaveForUser(s.cfg, username, &m); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, map[string]any{"ok": true})
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	s.mux.HandleFunc("/music/tasks/", func(w http.ResponseWriter, r *http.Request) {
+		username, _ := auth.UsernameFromRequest(r)
+		id := strings.TrimPrefix(r.URL.Path, "/music/tasks/")
+		if id == "" {
+			http.Error(w, "missing id", http.StatusBadRequest)
+			return
+		}
+		m, path, err := music.LoadForUser(s.cfg, username)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			if m.Tasks == nil {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			tm, ok := m.Tasks[id]
+			if !ok {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			writeJSON(w, map[string]any{
+				"id":     id,
+				"type":   tm.Type,
+				"name":   tm.Name,
+				"url":    tm.URL,
+				"path":   tm.Path,
+				"volume": tm.Volume,
+				"muted":  tm.Muted,
+			})
+		case http.MethodPut:
+			var tm music.TaskMusic
+			if err := jsonNewDecoder(r).Decode(&tm); err != nil {
+				http.Error(w, "invalid json", http.StatusBadRequest)
+				return
+			}
+			if m.Tasks == nil {
+				m.Tasks = map[string]music.TaskMusic{}
+			}
+			m.Tasks[id] = tm
+			if _, err := music.SaveForUser(s.cfg, username, m); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, map[string]any{"ok": true, "path": path})
+		case http.MethodDelete:
+			if m.Tasks != nil {
+				delete(m.Tasks, id)
+			}
+			if _, err := music.SaveForUser(s.cfg, username, m); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, map[string]any{"ok": true, "path": path})
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
 
-    s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Content-Type", "text/html; charset=utf-8")
-        t := template.Must(s.layoutTpl.Clone())
-        _, _ = t.New("content").Parse(`<h1>dstask Web UI</h1><p>Signed in as: {{.User}}</p>
+	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		t := template.Must(s.layoutTpl.Clone())
+		_, _ = t.New("content").Parse(`<h1>dstask Web UI</h1><p>Signed in as: {{.User}}</p>
 {{if .IsGitRepo}}
   {{if .RemoteURL}}
     <div style="margin:8px 0;">Remote: <code>{{.RemoteURL}}</code></div>
@@ -473,49 +960,49 @@ func (s *Server) routes() {
     <a href="/" style="margin-left:8px;">abbrechen</a>
   </form>
 {{end}}`) // placeholder
-        username, _ := auth.UsernameFromRequest(r)
-        remoteURL, _ := s.runner.GitRemoteURL(username)
-        // Prüfe Git-Repo vorhanden
-        isRepo := false
-        repoDir := ""
-        // Primär aus Konfiguration (repos) ableiten
-        if home, ok := config.ResolveHomeForUsername(s.cfg, username); ok && home != "" {
-            dir := home
-            if !strings.HasSuffix(strings.ToLower(dir), ".dstask") {
-                dir = dir + string('/') + ".dstask"
-            }
-            repoDir = dir
-            if fi, err := os.Stat(dir + string('/') + ".git"); err == nil && fi.IsDir() {
-                isRepo = true
-            }
-        } else {
-            // Fallback: Prozess-HOME verwenden, um dem Nutzer den erwarteten Pfad anzuzeigen
-            if h, err := os.UserHomeDir(); err == nil && h != "" {
-                d := h
-                if !strings.HasSuffix(strings.ToLower(d), ".dstask") {
-                    d = d + string('/') + ".dstask"
-                }
-                repoDir = d
-                if fi, err := os.Stat(d + string('/') + ".git"); err == nil && fi.IsDir() {
-                    isRepo = true
-                }
-            }
-        }
-        show, entries, moreURL, canMore, ret := s.footerData(r, username)
-        _ = t.Execute(w, map[string]any{
-            "User":        username,
-            "RemoteURL":   remoteURL,
-            "IsGitRepo":   isRepo,
-            "RepoDir":     repoDir,
-            "Active":      activeFromPath(r.URL.Path),
-            "Flash":       s.getFlash(r),
-            "ShowCmdLog":  show,
-            "CmdEntries":  entries,
-            "MoreURL":     moreURL,
-            "CanShowMore": canMore,
-            "ReturnURL":   ret,
-        })
-    })
+		username, _ := auth.UsernameFromRequest(r)
+		remoteURL, _ := s.runner.GitRemoteURL(username)
+		// Prüfe Git-Repo vorhanden
+		isRepo := false
+		repoDir := ""
+		// Primär aus Konfiguration (repos) ableiten
+		if home, ok := config.ResolveHomeForUsername(s.cfg, username); ok && home != "" {
+			dir := home
+			if !strings.HasSuffix(strings.ToLower(dir), ".dstask") {
+				dir = dir + string('/') + ".dstask"
+			}
+			repoDir = dir
+			if fi, err := os.Stat(dir + string('/') + ".git"); err == nil && fi.IsDir() {
+				isRepo = true
+			}
+		} else {
+			// Fallback: Prozess-HOME verwenden, um dem Nutzer den erwarteten Pfad anzuzeigen
+			if h, err := os.UserHomeDir(); err == nil && h != "" {
+				d := h
+				if !strings.HasSuffix(strings.ToLower(d), ".dstask") {
+					d = d + string('/') + ".dstask"
+				}
+				repoDir = d
+				if fi, err := os.Stat(d + string('/') + ".git"); err == nil && fi.IsDir() {
+					isRepo = true
+				}
+			}
+		}
+		show, entries, moreURL, canMore, ret := s.footerData(r, username)
+		_ = t.Execute(w, map[string]any{
+			"User":        username,
+			"RemoteURL":   remoteURL,
+			"IsGitRepo":   isRepo,
+			"RepoDir":     repoDir,
+			"Active":      activeFromPath(r.URL.Path),
+			"Flash":       s.getFlash(r),
+			"ShowCmdLog":  show,
+			"CmdEntries":  entries,
+			"MoreURL":     moreURL,
+			"CanShowMore": canMore,
+			"ReturnURL":   ret,
+		})
+	})
 
 	s.mux.HandleFunc("/next", func(w http.ResponseWriter, r *http.Request) {
 		username, _ := auth.UsernameFromRequest(r)
@@ -933,9 +1420,9 @@ func (s *Server) routes() {
 			}
 			// Due: prefer date picker if present
 			dueDate := strings.TrimSpace(r.FormValue("dueDate"))
-			due := strings.TrimSpace(r.FormValue("due"))
+			due := sanitizeDueValue(r.FormValue("due"))
 			if dueDate != "" {
-				due = dueDate
+				due = sanitizeDueValue(dueDate)
 			}
 
 			// Compose args per dstask template Syntax: template <summary tokens...> +tags project: due:
@@ -1214,7 +1701,7 @@ func (s *Server) routes() {
 
 			// Parse due date to YYYY-MM-DD format if it's a date
 			dueDateValue := ""
-			dueValue := currentTemplate["due"]
+			dueValue := sanitizeDueValue(currentTemplate["due"])
 			if dueValue != "" {
 				if t := parseTimeOrZero(dueValue); !t.IsZero() {
 					dueDateValue = t.Format("2006-01-02")
@@ -1268,9 +1755,9 @@ func (s *Server) routes() {
 				project = ps
 			}
 			dueDate := strings.TrimSpace(r.FormValue("dueDate"))
-			due := strings.TrimSpace(r.FormValue("due"))
+			due := sanitizeDueValue(r.FormValue("due"))
 			if dueDate != "" {
-				due = dueDate
+				due = sanitizeDueValue(dueDate)
 			}
 
 			// Lösche altes Template
@@ -1501,9 +1988,9 @@ func (s *Server) routes() {
 		}
 		// Due: prefer date picker if present
 		dueDate := strings.TrimSpace(r.FormValue("dueDate"))
-		due := strings.TrimSpace(r.FormValue("due"))
+		due := sanitizeDueValue(r.FormValue("due"))
 		if dueDate != "" {
-			due = dueDate
+			due = sanitizeDueValue(dueDate)
 		}
 
 		// Compose args per dstask add Syntax: add <summary tokens...> +tags project: due:
@@ -1561,8 +2048,60 @@ func (s *Server) routes() {
 	// Task Aktionen: /tasks/{id}/start|stop|done|remove|log|note
 	// Open URLs: /tasks/{id}/open
 	s.mux.HandleFunc("/tasks/", func(w http.ResponseWriter, r *http.Request) {
-		// Prüfe zuerst auf GET /tasks/{id}/open für URL-Anzeige
+		applog.Infof("/tasks: %s %s", r.Method, r.URL.Path)
+		// Parse path parts
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		// Handle task actions via GET or POST first (start|stop|done|remove|log)
+		if len(parts) == 3 && parts[0] == "tasks" {
+			act := strings.TrimSpace(parts[2])
+			if act == "start" || act == "stop" || act == "done" || act == "remove" || act == "log" {
+				id := strings.TrimSpace(parts[1])
+				if id == "" {
+					http.NotFound(w, r)
+					return
+				}
+				username, _ := auth.UsernameFromRequest(r)
+				res := s.runner.Run(username, 10*time.Second, act, id)
+				if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
+					applog.Warnf("/tasks action failed: %s %s code=%d timeout=%v err=%v", act, id, res.ExitCode, res.TimedOut, res.Err)
+					s.setFlash(w, "error", "Task action failed")
+				} else {
+					applog.Infof("/tasks action ok: %s %s", act, id)
+					var token string
+					if act == "start" || act == "stop" {
+						if m, _, err := music.LoadForUser(s.cfg, username); err == nil && m.Tasks != nil {
+							if tm, ok := m.Tasks[id]; ok && tm.Type == "radio" && tm.URL != "" {
+								if act == "start" {
+									// include id and persisted volume/muted in token (always send volume to restore exact state)
+									token = "__MUSIC_START__" + tm.Name + "|" + tm.URL + "|id=" + id + "|vol=" + strconv.FormatFloat(float64(tm.Volume), 'f', 2, 32)
+									if tm.Muted {
+										token += "|muted=1"
+									}
+									applog.Infof("music token set for task %s start: %s", id, tm.URL)
+								} else {
+									token = "__MUSIC_STOP__"
+									applog.Infof("music token set for task %s stop", id)
+								}
+							} else {
+								applog.Debugf("no music mapping for task %s or URL empty", id)
+							}
+						} else if err != nil {
+							applog.Warnf("loading music map failed for %s: %v", username, err)
+						}
+					}
+					msg := "Task action applied"
+					if token != "" {
+						s.setFlash(w, "success", token+"\n"+msg)
+					} else {
+						s.setFlash(w, "success", msg)
+					}
+				}
+				http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
+				return
+			}
+		}
+		// Prüfe auf GET /tasks/{id}/open für URL-Anzeige
+
 		if len(parts) == 3 && parts[0] == "tasks" && parts[2] == "open" && r.Method == http.MethodGet {
 			id := parts[1]
 			if id == "" {
@@ -1708,7 +2247,7 @@ func (s *Server) routes() {
 			summary := trimQuotes(str(firstOf(task, "summary", "Summary", "description", "Description")))
 			project := trimQuotes(str(firstOf(task, "project", "Project")))
 			priority := str(firstOf(task, "priority", "Priority"))
-			dueValue := trimQuotes(str(firstOf(task, "due", "Due", "dueDate", "DueDate")))
+			dueValue := sanitizeDueValue(trimQuotes(str(firstOf(task, "due", "Due", "dueDate", "DueDate"))))
 			notes := trimQuotes(str(firstOf(task, "notes", "annotations", "note")))
 
 			// Parse existing tags from task
@@ -1748,6 +2287,14 @@ func (s *Server) routes() {
 
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			t := template.Must(s.layoutTpl.Clone())
+			// Load existing music mapping for this task
+			mm, _, _ := music.LoadForUser(s.cfg, username)
+			var mtype, mname, murl, mpath string
+			if mm != nil {
+				if tm, ok := mm.Tasks[id]; ok {
+					mtype, mname, murl, mpath = tm.Type, tm.Name, tm.URL, tm.Path
+				}
+			}
 			_, _ = t.New("content").Parse(`
 <h2>Edit task #{{.TaskID}}</h2>
 <form method="post" action="/tasks/{{.TaskID}}/edit">
@@ -1804,6 +2351,54 @@ func (s *Server) routes() {
     </div>
     {{end}}
   </div>
+  <fieldset style="margin-top:12px;">
+    <legend>Music (radio station or local folder)</legend>
+    <div>
+      <label>Type:
+        <select name="music_type">
+          <option value="">(none)</option>
+          <option value="radio" {{if eq .MusicType "radio"}}selected{{end}}>radio</option>
+          <option value="folder" {{if eq .MusicType "folder"}}selected{{end}}>folder</option>
+        </select>
+      </label>
+    </div>
+    <div style="margin-top:6px;"><label>Name: <input name="music_name" value="{{.MusicName}}" placeholder="Station or folder label"><button type="button" id="music_name_search" style="margin-left:6px;">Search</button></label></div>
+    <div style="margin-top:6px;"><label>Stream URL: <input name="music_url" value="{{.MusicURL}}" style="width:60%" placeholder="https://… (for type=radio)"></label></div>
+    <div style="margin-top:6px;"><label>Folder path: <input name="music_path" value="{{.MusicPath}}" style="width:60%" placeholder="relative to ~/.dstask or absolute under HOME (for type=folder)"></label></div>
+    <div style="margin-top:6px;color:#6a737d;font-size:12px;">Hint: You can search stations at <a href="/music/assign" title="Assign music">/music/assign</a> and copy the resolved URL.</div>
+    <ul id="music_search_results" style="max-height:160px; overflow:auto; border:1px solid #ddd; padding:6px; margin-top:6px;"></ul>
+  </fieldset>
+  <script>
+  (function(){
+    var typeSel = document.querySelector('select[name="music_type"]');
+    var nameInp = document.querySelector('input[name="music_name"]');
+    var urlInp  = document.querySelector('input[name="music_url"]');
+    var btn     = document.getElementById('music_name_search');
+    var ul      = document.getElementById('music_search_results');
+    if(!btn || !nameInp) return;
+    btn.addEventListener('click', function(){
+      if(typeSel && typeSel.value !== 'radio') return;
+      var q = (nameInp.value||'').trim(); if(!q) return;
+      ul.textContent = 'Searching…';
+      fetch('/music/search?q='+encodeURIComponent(q))
+        .then(function(r){ return r.json(); })
+        .then(function(arr){
+          ul.innerHTML = '';
+          (arr||[]).forEach(function(st){
+            var li = document.createElement('li');
+            li.style.cursor='pointer';
+            var nm = st.name || '(no name)';
+            var u  = st.url_resolved || st.url || '';
+            li.textContent = nm + ' — ' + u;
+            li.onclick = function(){ nameInp.value = nm; if(u) urlInp.value = u; };
+            ul.appendChild(li);
+          });
+          if(!ul.childElementCount){ ul.textContent = 'No results'; }
+        })
+        .catch(function(){ ul.textContent = 'Search failed'; });
+    });
+  })();
+  </script>
   <div style="margin-top:8px;">
     <button type="submit" title="Save changes to task">Update task</button>
     <button type="button" onclick="window.location.href='{{.Referer}}'; return false;" style="margin-left:8px;" title="Cancel editing and return to previous page">cancel</button>
@@ -1832,6 +2427,10 @@ func (s *Server) routes() {
 				"Tags":               tags,
 				"ExistingTags":       existingTags,
 				"Referer":            referer,
+				"MusicType":          mtype,
+				"MusicName":          mname,
+				"MusicURL":           murl,
+				"MusicPath":          mpath,
 				"Active":             activeFromPath(r.URL.Path),
 				"ShowCmdLog":         show,
 				"CmdEntries":         entries,
@@ -1867,11 +2466,16 @@ func (s *Server) routes() {
 			}
 			priority := strings.TrimSpace(r.FormValue("priority"))
 			dueDate := strings.TrimSpace(r.FormValue("dueDate"))
-			due := strings.TrimSpace(r.FormValue("due"))
+			due := sanitizeDueValue(r.FormValue("due"))
 			if dueDate != "" {
-				due = dueDate
+				due = sanitizeDueValue(dueDate)
 			}
 			notes := r.FormValue("notes") // Don't trim - preserve newlines
+			// Music mapping from form
+			mtype := strings.TrimSpace(r.FormValue("music_type"))
+			mname := strings.TrimSpace(r.FormValue("music_name"))
+			murl := strings.TrimSpace(r.FormValue("music_url"))
+			mpath := strings.TrimSpace(r.FormValue("music_path"))
 
 			// Build modify args: dstask <id> modify <summary> project: priority due: +tags
 			args := []string{id, "modify"}
@@ -1946,6 +2550,26 @@ func (s *Server) routes() {
 					applog.Infof("task note update succeeded (notes saved directly to YAML file)")
 				}
 			}
+			// Save music mapping based on form
+			if mtype != "" {
+				if mm, _, err := music.LoadForUser(s.cfg, username); err == nil {
+					if mm.Tasks == nil {
+						mm.Tasks = map[string]music.TaskMusic{}
+					}
+					tm := music.TaskMusic{Type: mtype, Name: mname}
+					if mtype == "radio" {
+						tm.URL = murl
+					} else if mtype == "folder" {
+						tm.Path = mpath
+					}
+					mm.Tasks[id] = tm
+					if _, err := music.SaveForUser(s.cfg, username, mm); err != nil {
+						applog.Warnf("failed to save music mapping: %v", err)
+					}
+				} else {
+					applog.Warnf("failed to load music map: %v", err)
+				}
+			}
 			if notesUpdateSuccess {
 				s.setFlash(w, "success", "Task updated successfully")
 			} else {
@@ -1964,67 +2588,7 @@ func (s *Server) routes() {
 			return
 		}
 
-		// Erwartet Pfad wie /tasks/123/start
-		id, action := parseTaskAction(r.URL.Path)
-		if id == "" || action == "" {
-			http.NotFound(w, r)
-			return
-		}
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		username, _ := auth.UsernameFromRequest(r)
-		var res dstask.Result
-		timeout := 10 * time.Second
-		switch action {
-		case "start", "stop", "done", "remove", "log":
-			// Einige dstask-Versionen bevorzugen die Syntax: dstask <action> <id>
-			res = s.runner.Run(username, timeout, action, id)
-			s.cmdStore.Append(username, "Task action", []string{action, id})
-		case "note":
-			if err := r.ParseForm(); err != nil {
-				http.Error(w, "invalid form", http.StatusBadRequest)
-				return
-			}
-			note := strings.TrimSpace(r.FormValue("note"))
-			if note == "" {
-				http.Error(w, "note required", http.StatusBadRequest)
-				return
-			}
-			// Für note: Übergabe per stdin wäre ideal; dstask akzeptiert Interaktivität.
-			// Vereinfachung: note Text direkt als Argument anhängen (dstask erlaubt dies mittels / ?)
-			// Fallback: id note und dann / als Trenner mit Text
-			// Wir nutzen: dstask <id> note <text>
-			// Für note ebenfalls: dstask note <id> <text>
-			res = s.runner.Run(username, timeout, "note", id, note)
-			s.cmdStore.Append(username, "Task action", []string{"note", id})
-		default:
-			http.NotFound(w, r)
-			return
-		}
-		if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
-			applog.Warnf("action %s failed for id=%s: code=%d timeout=%v err=%v", action, id, res.ExitCode, res.TimedOut, res.Err)
-			s.setFlash(w, "error", "Task action failed")
-			http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
-			return
-		}
-		applog.Infof("action %s succeeded for id=%s", action, id)
-		// trigger music start/stop via flash token for client-side JS
-		if action == "start" || action == "stop" {
-			if m, _, err := music.LoadForUser(s.cfg, username); err == nil && m.Tasks != nil {
-				if tm, ok := m.Tasks[id]; ok && tm.Type == "radio" && tm.URL != "" {
-					if action == "start" {
-						s.setFlash(w, "info", "__MUSIC_START__"+tm.Name+"|"+tm.URL)
-					} else {
-						s.setFlash(w, "info", "__MUSIC_STOP__")
-					}
-				}
-			}
-		}
-		s.setFlash(w, "success", "Task action applied")
-		http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
-		return
+		http.NotFound(w, r)
 	})
 
 	// Einfache Aktionsseite (UI-Politur): ID + Aktion auswählen
@@ -2121,7 +2685,7 @@ func (s *Server) routes() {
 		}
 		project := strings.TrimSpace(r.FormValue("project"))
 		priority := strings.TrimSpace(r.FormValue("priority"))
-		due := strings.TrimSpace(r.FormValue("due"))
+		due := sanitizeDueValue(r.FormValue("due"))
 		addTags := strings.TrimSpace(r.FormValue("addTags"))
 		removeTags := strings.TrimSpace(r.FormValue("removeTags"))
 
@@ -2221,17 +2785,17 @@ func (s *Server) routes() {
 			_ = t.Execute(w, nil)
 		case http.MethodPost:
 			username, _ := auth.UsernameFromRequest(r)
-            applog.Infof("/sync POST from %s", username)
-            // Falls kein Git-Repo vorhanden ist, biete Clone-Form an
-            if uhome, ok := config.ResolveHomeForUsername(s.cfg, username); ok && uhome != "" {
-                dir := uhome
-                if !strings.HasSuffix(strings.ToLower(dir), ".dstask") {
-                    dir = dir + string('/') + ".dstask"
-                }
-                if _, err := os.Stat(dir + string('/') + ".git"); err != nil {
-                    w.Header().Set("Content-Type", "text/html; charset=utf-8")
-                    t := template.Must(s.layoutTpl.Clone())
-                    _, _ = t.New("content").Parse(`<h2>Clone remote</h2>
+			applog.Infof("/sync POST from %s", username)
+			// Falls kein Git-Repo vorhanden ist, biete Clone-Form an
+			if uhome, ok := config.ResolveHomeForUsername(s.cfg, username); ok && uhome != "" {
+				dir := uhome
+				if !strings.HasSuffix(strings.ToLower(dir), ".dstask") {
+					dir = dir + string('/') + ".dstask"
+				}
+				if _, err := os.Stat(dir + string('/') + ".git"); err != nil {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					t := template.Must(s.layoutTpl.Clone())
+					_, _ = t.New("content").Parse(`<h2>Clone remote</h2>
 <p>Kein Git-Repository gefunden. Bitte gib eine Remote-URL an, um sie in <code>~/.dstask</code> zu klonen.</p>
 <form method="post" action="/sync/clone-remote">
   <div><label>Remote URL: <input name="url" required style="width:60%" placeholder="https://... oder git@..." /></label></div>
@@ -2240,16 +2804,16 @@ func (s *Server) routes() {
     <a href="/" style="margin-left:8px;">abbrechen</a>
   </div>
 </form>`)
-                    _ = t.Execute(w, nil)
-                    return
-                }
-            }
-            // Falls kein Remote gesetzt ist, biete Remote-Form an
-            if u, _ := s.runner.GitRemoteURL(username); strings.TrimSpace(u) == "" {
-                applog.Warnf("/sync: no remote configured for %s", username)
-                w.Header().Set("Content-Type", "text/html; charset=utf-8")
-                t := template.Must(s.layoutTpl.Clone())
-                _, _ = t.New("content").Parse(`<h2>Configure remote</h2>
+					_ = t.Execute(w, nil)
+					return
+				}
+			}
+			// Falls kein Remote gesetzt ist, biete Remote-Form an
+			if u, _ := s.runner.GitRemoteURL(username); strings.TrimSpace(u) == "" {
+				applog.Warnf("/sync: no remote configured for %s", username)
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				t := template.Must(s.layoutTpl.Clone())
+				_, _ = t.New("content").Parse(`<h2>Configure remote</h2>
 <p>Für Sync ist ein Remote-Repository erforderlich. Bitte gib eine Git-Remote-URL an (z. B. <code>git@github.com:user/repo.git</code> oder <code>https://github.com/user/repo.git</code>).</p>
 <form method="post" action="/sync/set-remote">
   <div><label>Remote URL: <input name="url" required style="width:60%" placeholder="https://... or git@..." /></label></div>
@@ -2258,16 +2822,16 @@ func (s *Server) routes() {
     <a href="/" style="margin-left:8px;">abbrechen</a>
   </div>
 </form>`)
-                _ = t.Execute(w, nil)
-                return
-            }
-            // Upstream sicherstellen (best effort)
-            if _, err := s.runner.GitSetUpstreamIfMissing(username); err != nil {
-                applog.Warnf("/sync: upstream missing; automatic setup failed: %v", err)
-            }
-            applog.Infof("/sync: starting dstask sync for %s", username)
+				_ = t.Execute(w, nil)
+				return
+			}
+			// Upstream sicherstellen (best effort)
+			if _, err := s.runner.GitSetUpstreamIfMissing(username); err != nil {
+				applog.Warnf("/sync: upstream missing; automatic setup failed: %v", err)
+			}
+			applog.Infof("/sync: starting dstask sync for %s", username)
 			res := s.runner.Run(username, 30_000_000_000, "sync") // 30s
-            applog.Infof("/sync: finished for %s: code=%d timeout=%v err=%v", username, res.ExitCode, res.TimedOut, res.Err)
+			applog.Infof("/sync: finished for %s: code=%d timeout=%v err=%v", username, res.ExitCode, res.TimedOut, res.Err)
 			s.cmdStore.Append(username, "Sync", []string{"sync"})
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			t := template.Must(s.layoutTpl.Clone())
@@ -2299,61 +2863,78 @@ git push -u origin master</pre>`
 		}
 	})
 
-    // Remote setzen
-    s.mux.HandleFunc("/sync/set-remote", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodPost {
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-        if err := r.ParseForm(); err != nil {
-            http.Error(w, "invalid form", http.StatusBadRequest)
-            return
-        }
-        url := strings.TrimSpace(r.FormValue("url"))
-        if url == "" {
-            http.Error(w, "url required", http.StatusBadRequest)
-            return
-        }
-        username, _ := auth.UsernameFromRequest(r)
-        applog.Infof("/sync/set-remote from %s: url=%s", username, url)
-        if err := s.runner.GitSetRemoteOrigin(username, url); err != nil {
-            s.setFlash(w, "error", "Remote konnte nicht gesetzt werden: "+stripANSI(err.Error()))
-            http.Redirect(w, r, "/", http.StatusSeeOther)
-            return
-        }
-        // Upstream setzen, falls nötig (best effort)
-        if _, err := s.runner.GitSetUpstreamIfMissing(username); err != nil {
-            applog.Warnf("/sync/set-remote: failed to set upstream: %v", err)
-            // Tipp geben, aber nicht als fatal behandeln
-            s.setFlash(w, "warning", "Remote gesetzt. Upstream konnte nicht automatisch gesetzt werden. Bitte im Repo setzen.")
-            http.Redirect(w, r, "/", http.StatusSeeOther)
-            return
-        }
-        s.setFlash(w, "success", "Remote konfiguriert. Du kannst jetzt Sync ausführen.")
-        http.Redirect(w, r, "/", http.StatusSeeOther)
-    })
+	// Remote setzen
+	s.mux.HandleFunc("/sync/set-remote", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 
-    // Simple assign UI: radio search and save mapping
-    s.mux.HandleFunc("/music/assign", func(w http.ResponseWriter, r *http.Request) {
-        username, _ := auth.UsernameFromRequest(r)
-        if r.Method == http.MethodPost {
-            if err := r.ParseForm(); err != nil { http.Error(w, "invalid form", http.StatusBadRequest); return }
-            taskID := strings.TrimSpace(r.FormValue("id"))
-            name := strings.TrimSpace(r.FormValue("name"))
-            urlv := strings.TrimSpace(r.FormValue("url"))
-            if taskID == "" || urlv == "" { http.Error(w, "id/url required", http.StatusBadRequest); return }
-            m, _, err := music.LoadForUser(s.cfg, username)
-            if err != nil { http.Error(w, err.Error(), http.StatusInternalServerError); return }
-            if m.Tasks == nil { m.Tasks = map[string]music.TaskMusic{} }
-            m.Tasks[taskID] = music.TaskMusic{Type: "radio", Name: name, URL: urlv}
-            if _, err := music.SaveForUser(s.cfg, username, m); err != nil { http.Error(w, err.Error(), http.StatusInternalServerError); return }
-            http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
-            return
-        }
-        // GET: render minimal form
-        w.Header().Set("Content-Type", "text/html; charset=utf-8")
-        t := template.Must(s.layoutTpl.Clone())
-        _, _ = t.New("content").Parse(`<h2>Assign music to task</h2>
+		// (removed stray /tasks/{id}/{action} handler here; real handler is in /tasks/ route)
+
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid form", http.StatusBadRequest)
+			return
+		}
+		url := strings.TrimSpace(r.FormValue("url"))
+		if url == "" {
+			http.Error(w, "url required", http.StatusBadRequest)
+			return
+		}
+		username, _ := auth.UsernameFromRequest(r)
+		applog.Infof("/sync/set-remote from %s: url=%s", username, url)
+		if err := s.runner.GitSetRemoteOrigin(username, url); err != nil {
+			s.setFlash(w, "error", "Remote konnte nicht gesetzt werden: "+stripANSI(err.Error()))
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		// Upstream setzen, falls nötig (best effort)
+		if _, err := s.runner.GitSetUpstreamIfMissing(username); err != nil {
+			applog.Warnf("/sync/set-remote: failed to set upstream: %v", err)
+			// Tipp geben, aber nicht als fatal behandeln
+			s.setFlash(w, "warning", "Remote gesetzt. Upstream konnte nicht automatisch gesetzt werden. Bitte im Repo setzen.")
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		s.setFlash(w, "success", "Remote konfiguriert. Du kannst jetzt Sync ausführen.")
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	})
+
+	// Simple assign UI: radio search and save mapping
+	s.mux.HandleFunc("/music/assign", func(w http.ResponseWriter, r *http.Request) {
+		username, _ := auth.UsernameFromRequest(r)
+		if r.Method == http.MethodPost {
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "invalid form", http.StatusBadRequest)
+				return
+			}
+			taskID := strings.TrimSpace(r.FormValue("id"))
+			name := strings.TrimSpace(r.FormValue("name"))
+			urlv := strings.TrimSpace(r.FormValue("url"))
+			if taskID == "" || urlv == "" {
+				http.Error(w, "id/url required", http.StatusBadRequest)
+				return
+			}
+			m, _, err := music.LoadForUser(s.cfg, username)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if m.Tasks == nil {
+				m.Tasks = map[string]music.TaskMusic{}
+			}
+			m.Tasks[taskID] = music.TaskMusic{Type: "radio", Name: name, URL: urlv}
+			if _, err := music.SaveForUser(s.cfg, username, m); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
+			return
+		}
+		// GET: render minimal form
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		t := template.Must(s.layoutTpl.Clone())
+		_, _ = t.New("content").Parse(`<h2>Assign music to task</h2>
 <form method="post">
   <div><label>Task ID <input name="id" required placeholder="123"/></label></div>
   <div style="margin-top:8px;"><label>Search station <input id="q" placeholder="name"/></label> <button id="search">Search</button></div>
@@ -2382,40 +2963,40 @@ document.getElementById('search').addEventListener('click', async (e)=>{
   });
 });
 </script>`)
-        _ = t.Execute(w, map[string]any{"Active": activeFromPath(r.URL.Path)})
-    })
+		_ = t.Execute(w, map[string]any{"Active": activeFromPath(r.URL.Path)})
+	})
 
-    // Remote klonen
-    s.mux.HandleFunc("/sync/clone-remote", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodPost {
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-        if err := r.ParseForm(); err != nil {
-            http.Error(w, "invalid form", http.StatusBadRequest)
-            return
-        }
-        url := strings.TrimSpace(r.FormValue("url"))
-        if url == "" {
-            http.Error(w, "url required", http.StatusBadRequest)
-            return
-        }
-        username, _ := auth.UsernameFromRequest(r)
-        applog.Infof("/sync/clone-remote from %s: url=%s", username, url)
-        if err := s.runner.GitCloneRemote(username, url); err != nil {
-            s.setFlash(w, "error", "Klonen fehlgeschlagen: "+stripANSI(err.Error()))
-            http.Redirect(w, r, "/", http.StatusSeeOther)
-            return
-        }
-        if _, err := s.runner.GitSetUpstreamIfMissing(username); err != nil {
-            applog.Warnf("/sync/clone-remote: failed to set upstream: %v", err)
-            s.setFlash(w, "warning", "Klonen erfolgreich. Upstream konnte nicht automatisch gesetzt werden.")
-            http.Redirect(w, r, "/", http.StatusSeeOther)
-            return
-        }
-        s.setFlash(w, "success", "Repository geklont. Du kannst jetzt Sync ausführen.")
-        http.Redirect(w, r, "/", http.StatusSeeOther)
-    })
+	// Remote klonen
+	s.mux.HandleFunc("/sync/clone-remote", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid form", http.StatusBadRequest)
+			return
+		}
+		url := strings.TrimSpace(r.FormValue("url"))
+		if url == "" {
+			http.Error(w, "url required", http.StatusBadRequest)
+			return
+		}
+		username, _ := auth.UsernameFromRequest(r)
+		applog.Infof("/sync/clone-remote from %s: url=%s", username, url)
+		if err := s.runner.GitCloneRemote(username, url); err != nil {
+			s.setFlash(w, "error", "Klonen fehlgeschlagen: "+stripANSI(err.Error()))
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		if _, err := s.runner.GitSetUpstreamIfMissing(username); err != nil {
+			applog.Warnf("/sync/clone-remote: failed to set upstream: %v", err)
+			s.setFlash(w, "warning", "Klonen erfolgreich. Upstream konnte nicht automatisch gesetzt werden.")
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		s.setFlash(w, "success", "Repository geklont. Du kannst jetzt Sync ausführen.")
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	})
 
 	// Undo last action
 	s.mux.HandleFunc("/undo", func(w http.ResponseWriter, r *http.Request) {
@@ -2570,7 +3151,7 @@ func (s *Server) Handler() http.Handler {
 			s.mux.ServeHTTP(w, r)
 			return
 		}
-    realm := "dstask"
+		realm := "dstask"
 		authMiddleware := auth.BasicAuthMiddleware(s.userStore, realm, protected)
 		authMiddleware.ServeHTTP(w, r)
 	})

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
-	"io"
 	"net/url"
 	"regexp"
 	"sort"
@@ -243,6 +242,18 @@ func quoteIfNeeded(s string) string {
 	return s
 }
 
+// sanitizeDueValue entfernt Platzhalter-Werte wie 0001-01-01T00:00:00Z, die von dstask für "kein Fälligkeitsdatum" verwendet werden.
+func sanitizeDueValue(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if strings.EqualFold(s, "0001-01-01T00:00:00Z") {
+		return ""
+	}
+	return s
+}
+
 // normalizeTag wandelt Leerzeichen im Tag in '-' um, da dstask Tags i.d.R. tokens sind
 func normalizeTag(tag string) string {
 	tag = strings.TrimSpace(tag)
@@ -340,15 +351,15 @@ func truncate(s string, max int) string {
 
 // helpers for JSON IO
 func writeJSON(w http.ResponseWriter, v any) {
-    w.Header().Set("Content-Type", "application/json; charset=utf-8")
-    enc := json.NewEncoder(w)
-    _ = enc.Encode(v)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	enc := json.NewEncoder(w)
+	_ = enc.Encode(v)
 }
 
 func jsonNewDecoder(r *http.Request) *json.Decoder {
-    dec := json.NewDecoder(r.Body)
-    dec.DisallowUnknownFields()
-    return dec
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	return dec
 }
 
 // stripANSI removes ANSI escape sequences (e.g., color codes) from a string.
