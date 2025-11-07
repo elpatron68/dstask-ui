@@ -1,32 +1,32 @@
 package main
 
 import (
+	"flag"
 	stdlog "log"
 	"net/http"
 	"os"
 
 	"github.com/elpatron68/dstask-ui/internal/auth"
 	"github.com/elpatron68/dstask-ui/internal/config"
+	"github.com/elpatron68/dstask-ui/internal/dstask"
 	applog "github.com/elpatron68/dstask-ui/internal/log"
-    "github.com/elpatron68/dstask-ui/internal/dstask"
 	"github.com/elpatron68/dstask-ui/internal/server"
 )
 
 func main() {
+	listenFlag := flag.String("listen", "", "override listen address (e.g. :8080 or 127.0.0.1:8080)")
+	flag.Parse()
+
 	username := getenvDefault("DSTWEB_USER", "admin")
 	password := getenvDefault("DSTWEB_PASS", "admin")
 
-    // Config laden aus <HOME>/.dstask-ui/config.yaml; wenn fehlend, wird sie mit Defaults erzeugt
-    cfg, err := config.Load("")
+	// Config laden aus <HOME>/.dstask-ui/config.yaml; wenn fehlend, wird sie mit Defaults erzeugt
+	cfg, err := config.Load("")
 	if err != nil {
 		stdlog.Fatalf("config error: %v", err)
 	}
 
-	// Listen address: config.yaml > ENV > default
-	listenAddr := cfg.Listen
-	if listenAddr == "" {
-		listenAddr = getenvDefault("DSTWEB_LISTEN", ":8080")
-	}
+	listenAddr := resolveListenAddress(cfg, *listenFlag)
 
 	// Init logging
 	applog.InitFromEnvFallback(cfg.Logging.Level)
@@ -48,21 +48,21 @@ func main() {
 		}
 	}
 
-    // Startup-Checks: dstask-Binary + Repo(s)
-    usernames := make([]string, 0, len(cfg.Repos))
-    for uname := range cfg.Repos {
-        usernames = append(usernames, uname)
-    }
-    // Wenn keine Repos konfiguriert, verwende den konfigurierten/an Umgebungsvariablen hängenden Login-Nutzer,
-    // damit zumindest das Repo im Prozess-HOME initialisiert wird.
-    if len(usernames) == 0 {
-        usernames = append(usernames, username)
-    }
-    if err := dstask.EnsureReady(cfg, usernames); err != nil {
-        stdlog.Fatalf("startup check failed: %v", err)
-    }
+	// Startup-Checks: dstask-Binary + Repo(s)
+	usernames := make([]string, 0, len(cfg.Repos))
+	for uname := range cfg.Repos {
+		usernames = append(usernames, uname)
+	}
+	// Wenn keine Repos konfiguriert, verwende den konfigurierten/an Umgebungsvariablen hängenden Login-Nutzer,
+	// damit zumindest das Repo im Prozess-HOME initialisiert wird.
+	if len(usernames) == 0 {
+		usernames = append(usernames, username)
+	}
+	if err := dstask.EnsureReady(cfg, usernames); err != nil {
+		stdlog.Fatalf("startup check failed: %v", err)
+	}
 
-    srv := server.NewServerWithConfig(userStore, cfg)
+	srv := server.NewServerWithConfig(userStore, cfg)
 
 	stdlog.Printf("dstask web UI listening on %s", listenAddr)
 	if err := http.ListenAndServe(listenAddr, srv.Handler()); err != nil {
@@ -76,4 +76,17 @@ func getenvDefault(key, def string) string {
 		return def
 	}
 	return v
+}
+
+func resolveListenAddress(cfg *config.Config, cli string) string {
+	if cli != "" {
+		return cli
+	}
+	if env := os.Getenv("DSTWEB_LISTEN"); env != "" {
+		return env
+	}
+	if cfg != nil && cfg.Listen != "" {
+		return cfg.Listen
+	}
+	return ":8080"
 }

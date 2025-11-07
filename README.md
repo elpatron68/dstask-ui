@@ -45,6 +45,7 @@ logging:
 # dstaskBin: "/usr/local/bin/dstask"   # or on Windows: "C:\\tools\\dstask.exe"
 # Place this file into `~/.dstask-ui/config.yaml` (Windows: `%USERPROFILE%\.dstask-ui\config.yaml`).
 ```
+Command-line overrides: run `dstask-web -listen 127.0.0.1:3000` to force a listen address. The flag takes precedence over both `config.yaml` and the `DSTWEB_LISTEN` environment variable.
 
 #### Path specification and expansion rules
 
@@ -80,6 +81,12 @@ export DSTWEB_USER=admin
 export DSTWEB_PASS=admin
 ./bin/dstask-web
 # Browser: http://localhost:8080/
+```
+
+Optional CLI override for the listen port:
+
+```bash
+./bin/dstask-web -listen 127.0.0.1:3000
 ```
 
 Once signed in you can open **Tasks → New** to create a task and attach a radio stream:
@@ -189,6 +196,8 @@ $env:DSTWEB_PASS='admin'
 ./bin/dstask-web.exe
 # Browser: http://localhost:8080/
 ```
+
+You can equally specify `.\bin	dstask-web.exe -listen 0.0.0.0:9000` on Windows.
 
 Streams are always proxied through `/music/proxy`, so browsers receive audio from the same origin and difficult referer/CORS requirements of public radio services are handled by the server.
 
