@@ -43,6 +43,7 @@ logging:
   level: "info"
 # dstaskBin is optional; if omitted/empty, dstask is discovered via PATH
 # dstaskBin: "/usr/local/bin/dstask"   # or on Windows: "C:\\tools\\dstask.exe"
+# Place this file into `~/.dstask-ui/config.yaml` (Windows: `%USERPROFILE%\.dstask-ui\config.yaml`).
 ```
 
 #### Path specification and expansion rules
