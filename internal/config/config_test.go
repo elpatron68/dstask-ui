@@ -8,10 +8,10 @@ import (
 
 func TestDefaultHasReasonableValues(t *testing.T) {
 	cfg := Default()
-    // dstaskBin is optional now; default may be empty and PATH autodetection is used at runtime
-    if cfg.DstaskBin != "" {
-        t.Fatalf("expected empty default dstask bin, got %q", cfg.DstaskBin)
-    }
+	// dstaskBin is optional now; default may be empty and PATH autodetection is used at runtime
+	if cfg.DstaskBin != "" {
+		t.Fatalf("expected empty default dstask bin, got %q", cfg.DstaskBin)
+	}
 	if cfg.Listen != ":8080" {
 		t.Fatalf("expected default listen :8080, got %q", cfg.Listen)
 	}
@@ -24,6 +24,9 @@ func TestDefaultHasReasonableValues(t *testing.T) {
 	if cfg.UI.CommandLogMax <= 0 {
 		t.Fatalf("expected positive CommandLogMax")
 	}
+	if cfg.GitAutoSync {
+		t.Fatalf("expected GitAutoSync default false")
+	}
 }
 
 func TestLoadEnvOverrides(t *testing.T) {
@@ -32,6 +35,7 @@ func TestLoadEnvOverrides(t *testing.T) {
 	t.Setenv("DSTWEB_LOG_LEVEL", "debug")
 	t.Setenv("DSTWEB_UI_SHOW_CMDLOG", "0")
 	t.Setenv("DSTWEB_CMDLOG_MAX", "50")
+	t.Setenv("DSTWEB_GIT_AUTOSYNC", "true")
 
 	cfg, err := Load("__does_not_exist.yaml")
 	if err != nil {
@@ -51,6 +55,9 @@ func TestLoadEnvOverrides(t *testing.T) {
 	}
 	if cfg.UI.CommandLogMax != 50 {
 		t.Fatalf("UI.CommandLogMax expected 50 via env, got %d", cfg.UI.CommandLogMax)
+	}
+	if !cfg.GitAutoSync {
+		t.Fatalf("GitAutoSync expected true via env override")
 	}
 }
 
@@ -75,9 +82,9 @@ func TestLoadFromFileAndResolveHome(t *testing.T) {
 			}
 		}
 	}()
-	
+
 	dir := t.TempDir()
-	yaml := []byte("dstaskBin: 'D:/dstask.exe'\nlisten: '127.0.0.1:9000'\nrepos:\n  alice: 'C:/Users/alice/.dstask'\nlogging:\n  level: 'warn'\nui:\n  showCommandLog: false\n  commandLogMax: 12\n")
+	yaml := []byte("dstaskBin: 'D:/dstask.exe'\nlisten: '127.0.0.1:9000'\ngitAutoSync: true\nrepos:\n  alice: 'C:/Users/alice/.dstask'\nlogging:\n  level: 'warn'\nui:\n  showCommandLog: false\n  commandLogMax: 12\n")
 	path := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(path, yaml, 0644); err != nil {
 		t.Fatalf("write: %v", err)
@@ -100,6 +107,9 @@ func TestLoadFromFileAndResolveHome(t *testing.T) {
 	}
 	if cfg.UI.CommandLogMax != 12 {
 		t.Fatalf("file load failed for ui.commandLogMax: %d", cfg.UI.CommandLogMax)
+	}
+	if !cfg.GitAutoSync {
+		t.Fatalf("file load failed for gitAutoSync")
 	}
 	home, ok := ResolveHomeForUsername(cfg, "alice")
 	if !ok {

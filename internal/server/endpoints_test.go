@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/elpatron68/dstask-ui/internal/auth"
 	"github.com/elpatron68/dstask-ui/internal/config"
@@ -121,6 +123,44 @@ func TestTemplatesEndpoint_RendersTable_FromJSON(t *testing.T) {
 	body := rr.Body.String()
 	if !strings.Contains(body, "Templates") || !strings.Contains(body, "Template A") || !strings.Contains(body, "Template B") {
 		t.Fatalf("templates page did not render expected templates: %s", body)
+	}
+}
+
+func TestAutoSyncTriggeredAfterTaskAdd(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	os.MkdirAll(filepath.Join(home, ".dstask"), 0755)
+	stub := createDstaskStub(t, tmp)
+	s := newTestServerWithStub(t, stub, home)
+	s.cfg.GitAutoSync = true
+
+	form := url.Values{}
+	form.Set("summary", "Test task via UI")
+	req := httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(form.Encode()))
+	req.SetBasicAuth("admin", "admin")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("expected redirect after task creation, got %d", rr.Code)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	found := false
+	for !found && time.Now().Before(deadline) {
+		entries := s.cmdStore.List("admin", 5)
+		for _, e := range entries {
+			if e.Context == "Auto sync" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	if !found {
+		t.Fatalf("expected auto sync command log entry")
 	}
 }
 

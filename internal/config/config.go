@@ -1,15 +1,15 @@
 package config
 
 import (
-    "errors"
-    "os"
-    "path/filepath"
-    "runtime"
-    "strconv"
-    "strings"
+	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
 
-    applog "github.com/elpatron68/dstask-ui/internal/log"
-    "gopkg.in/yaml.v3"
+	applog "github.com/elpatron68/dstask-ui/internal/log"
+	"gopkg.in/yaml.v3"
 )
 
 type UserConfig struct {
@@ -27,83 +27,85 @@ type UIConfig struct {
 }
 
 type Config struct {
-	DstaskBin string            `yaml:"dstaskBin"`
-	Listen    string            `yaml:"listen"` // listen address (e.g., ":8080")
-	Users     []UserConfig      `yaml:"users"`
-	Repos     map[string]string `yaml:"repos"` // username -> path to ~/.dstask or home dir
-	Logging   LoggingConfig     `yaml:"logging"`
-	UI        UIConfig          `yaml:"ui"`
+	DstaskBin   string            `yaml:"dstaskBin"`
+	Listen      string            `yaml:"listen"` // listen address (e.g., ":8080")
+	Users       []UserConfig      `yaml:"users"`
+	Repos       map[string]string `yaml:"repos"` // username -> path to ~/.dstask or home dir
+	Logging     LoggingConfig     `yaml:"logging"`
+	UI          UIConfig          `yaml:"ui"`
+	GitAutoSync bool              `yaml:"gitAutoSync"`
 }
 
 func Default() *Config {
 	return &Config{
-        DstaskBin: defaultDstaskBin(),
-		Listen:    ":8080",
-		Users:     []UserConfig{},
-		Repos:     map[string]string{},
-		Logging:   LoggingConfig{Level: "info"},
-		UI:        UIConfig{ShowCommandLog: true, CommandLogMax: 200},
+		DstaskBin:   defaultDstaskBin(),
+		Listen:      ":8080",
+		Users:       []UserConfig{},
+		Repos:       map[string]string{},
+		Logging:     LoggingConfig{Level: "info"},
+		UI:          UIConfig{ShowCommandLog: true, CommandLogMax: 200},
+		GitAutoSync: false,
 	}
 }
 
 func defaultDstaskBin() string {
-    // Kein Default-Pfad mehr: wir versuchen PATH-Autodetektion beim Start
-    return ""
+	// Kein Default-Pfad mehr: wir versuchen PATH-Autodetektion beim Start
+	return ""
 }
 
 // Load lädt eine optionale YAML-Datei. Wenn pfad leer oder Datei fehlt, werden Defaults geliefert.
 func Load(path string) (*Config, error) {
-    cfg := Default()
+	cfg := Default()
 
-    // Standardpfad: <HOME>/.dstask-ui/config.yaml (Windows: %USERPROFILE%\.dstask-ui)
-    if path == "" {
-        home, err := os.UserHomeDir()
-        if err == nil && home != "" {
-            baseDir := filepath.Join(home, ".dstask-ui")
-            if err := os.MkdirAll(baseDir, 0755); err == nil {
-                path = filepath.Join(baseDir, "config.yaml")
-            } else {
-                // Fallback: Arbeitsverzeichnis
-                path = "config.yaml"
-            }
-        } else {
-            // Fallback: Arbeitsverzeichnis
-            path = "config.yaml"
-        }
-    }
+	// Standardpfad: <HOME>/.dstask-ui/config.yaml (Windows: %USERPROFILE%\.dstask-ui)
+	if path == "" {
+		home, err := os.UserHomeDir()
+		if err == nil && home != "" {
+			baseDir := filepath.Join(home, ".dstask-ui")
+			if err := os.MkdirAll(baseDir, 0755); err == nil {
+				path = filepath.Join(baseDir, "config.yaml")
+			} else {
+				// Fallback: Arbeitsverzeichnis
+				path = "config.yaml"
+			}
+		} else {
+			// Fallback: Arbeitsverzeichnis
+			path = "config.yaml"
+		}
+	}
 
-    data, err := os.ReadFile(path)
-    if err != nil {
-        if errors.Is(err, os.ErrNotExist) {
-            // Datei existiert nicht: Defaults anwenden und Datei anlegen
-            applyEnvOverrides(cfg)
-            if err := writeDefaultConfigFile(path, cfg); err != nil {
-                return nil, err
-            }
-            applog.Infof("configuration file created with default values: %s", path)
-            applog.Infof("note: adjust `repos` and other fields as needed in %s", path)
-            return cfg, nil
-        }
-        return nil, err
-    }
-    if err := yaml.Unmarshal(data, cfg); err != nil {
-        return nil, err
-    }
-    applyEnvOverrides(cfg)
-    return cfg, nil
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// Datei existiert nicht: Defaults anwenden und Datei anlegen
+			applyEnvOverrides(cfg)
+			if err := writeDefaultConfigFile(path, cfg); err != nil {
+				return nil, err
+			}
+			applog.Infof("configuration file created with default values: %s", path)
+			applog.Infof("note: adjust `repos` and other fields as needed in %s", path)
+			return cfg, nil
+		}
+		return nil, err
+	}
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return nil, err
+	}
+	applyEnvOverrides(cfg)
+	return cfg, nil
 }
 
 func writeDefaultConfigFile(path string, cfg *Config) error {
-    // Elternverzeichnis sicherstellen
-    if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-        return err
-    }
-    // YAML schreiben
-    out, err := yaml.Marshal(cfg)
-    if err != nil {
-        return err
-    }
-    return os.WriteFile(path, out, 0644)
+	// Elternverzeichnis sicherstellen
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	// YAML schreiben
+	out, err := yaml.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, out, 0644)
 }
 
 func applyEnvOverrides(cfg *Config) {
@@ -128,52 +130,59 @@ func applyEnvOverrides(cfg *Config) {
 			cfg.UI.CommandLogMax = n
 		}
 	}
+	if v := os.Getenv("DSTWEB_GIT_AUTOSYNC"); v != "" {
+		if v == "1" || strings.EqualFold(v, "true") {
+			cfg.GitAutoSync = true
+		} else if v == "0" || strings.EqualFold(v, "false") {
+			cfg.GitAutoSync = false
+		}
+	}
 }
 
 // ResolveHomeForUsername bestimmt das HOME für dstask anhand der Repo-Konfiguration.
 // Erwartet, dass Repos[username] entweder auf ~/.dstask oder auf das Home-Verzeichnis zeigt.
 func ResolveHomeForUsername(cfg *Config, username string) (string, bool) {
-    p, ok := cfg.Repos[username]
-    if !ok || p == "" {
-        return "", false
-    }
+	p, ok := cfg.Repos[username]
+	if !ok || p == "" {
+		return "", false
+	}
 
-    // Expand ~ und Umgebungsvariablen
-    p = expandUserPath(p)
-    p = os.ExpandEnv(p)
-    p = filepath.Clean(p)
+	// Expand ~ und Umgebungsvariablen
+	p = expandUserPath(p)
+	p = os.ExpandEnv(p)
+	p = filepath.Clean(p)
 
-    base := filepath.Base(p)
-    if base == ".dstask" {
-        return filepath.Dir(p), true
-    }
-    return p, true
+	base := filepath.Base(p)
+	if base == ".dstask" {
+		return filepath.Dir(p), true
+	}
+	return p, true
 }
 
 // expandUserPath ersetzt führendes "~" durch das Home-Verzeichnis des aktuellen Prozesses.
 // Unterstützt nur "~" (nicht "~user").
 func expandUserPath(path string) string {
-    if path == "" {
-        return path
-    }
-    if strings.HasPrefix(path, "~") {
-        // Nur direktes ~ oder ~/...
-        if len(path) == 1 || path[1] == '/' || path[1] == '\\' {
-            // Plattformübergreifend: Unter Windows erlauben wir "%USERPROFILE%" Auflösung,
-            // sodass die Konfiguration mit "~/..." portabel bleibt.
-            if runtime.GOOS == "windows" {
-                // Ersetze ~ durch %USERPROFILE% und lasse os.ExpandEnv später auflösen
-                // Entferne führenden ~ und eventuellen Separator
-                tail := strings.TrimPrefix(path, "~")
-                tail = strings.TrimPrefix(tail, "/")
-                tail = strings.TrimPrefix(tail, "\\")
-                return filepath.Join("%USERPROFILE%", tail)
-            }
-            if home, err := os.UserHomeDir(); err == nil && home != "" {
-                // Ersetze nur das führende ~
-                return filepath.Join(home, strings.TrimPrefix(path, "~"))
-            }
-        }
-    }
-    return path
+	if path == "" {
+		return path
+	}
+	if strings.HasPrefix(path, "~") {
+		// Nur direktes ~ oder ~/...
+		if len(path) == 1 || path[1] == '/' || path[1] == '\\' {
+			// Plattformübergreifend: Unter Windows erlauben wir "%USERPROFILE%" Auflösung,
+			// sodass die Konfiguration mit "~/..." portabel bleibt.
+			if runtime.GOOS == "windows" {
+				// Ersetze ~ durch %USERPROFILE% und lasse os.ExpandEnv später auflösen
+				// Entferne führenden ~ und eventuellen Separator
+				tail := strings.TrimPrefix(path, "~")
+				tail = strings.TrimPrefix(tail, "/")
+				tail = strings.TrimPrefix(tail, "\\")
+				return filepath.Join("%USERPROFILE%", tail)
+			}
+			if home, err := os.UserHomeDir(); err == nil && home != "" {
+				// Ersetze nur das führende ~
+				return filepath.Join(home, strings.TrimPrefix(path, "~"))
+			}
+		}
+	}
+	return path
 }

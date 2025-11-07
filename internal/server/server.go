@@ -731,6 +731,9 @@ func (s *Server) routes() {
 		}
 		msg := fmt.Sprintf("Batch %s: %d ok, %d skipped, %d failed", action, ok, skipped, failed)
 		s.setFlash(w, "info", msg)
+		if ok > 0 {
+			s.autoSync(username)
+		}
 		http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
 	})
 	// Toggle command log visibility via cookie
@@ -1996,6 +1999,7 @@ func (s *Server) routes() {
 			return
 		}
 		s.setFlash(w, "success", "Task created")
+		s.autoSync(username)
 		http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
 	})
 
@@ -2049,6 +2053,7 @@ func (s *Server) routes() {
 					} else {
 						s.setFlash(w, "success", msg)
 					}
+					s.autoSync(username)
 				}
 				http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
 				return
@@ -2521,6 +2526,7 @@ func (s *Server) routes() {
 					applog.Warnf("failed to load music map: %v", err)
 				}
 			}
+			s.autoSync(username)
 			if notesUpdateSuccess {
 				s.setFlash(w, "success", "Task updated successfully")
 			} else {
@@ -2616,6 +2622,7 @@ func (s *Server) routes() {
 			return
 		}
 		s.setFlash(w, "success", "Task action applied")
+		s.autoSync(username)
 		http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
 	})
 
@@ -2685,6 +2692,7 @@ func (s *Server) routes() {
 			return
 		}
 		s.setFlash(w, "success", "Task modified")
+		s.autoSync(username)
 		http.Redirect(w, r, "/open?html=1", http.StatusSeeOther)
 	})
 
@@ -2737,9 +2745,9 @@ func (s *Server) routes() {
 		case http.MethodPost:
 			username, _ := auth.UsernameFromRequest(r)
 			applog.Infof("/sync POST from %s", username)
-	if dirty, err := dstask.IsRepoDirty(s.cfg, username); err == nil && dirty {
-		s.setFlash(w, "warning", "Local .dstask repository has uncommitted changes. Please commit or pull before syncing again.")
-	}
+			if dirty, err := dstask.IsRepoDirty(s.cfg, username); err == nil && dirty {
+				s.setFlash(w, "warning", "Local .dstask repository has uncommitted changes. Please commit or pull before syncing again.")
+			}
 			// Falls kein Git-Repo vorhanden ist, biete Clone-Form an
 			if uhome, ok := config.ResolveHomeForUsername(s.cfg, username); ok && uhome != "" {
 				dir := uhome
@@ -3009,6 +3017,21 @@ func urlQueryEscape(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "|", "/"), "\n", " ")
 }
 func urlQueryUnescape(s string) string { return s }
+
+func (s *Server) autoSync(username string) {
+	if s == nil || s.cfg == nil || !s.cfg.GitAutoSync || s.runner == nil || username == "" {
+		return
+	}
+	go func() {
+		res := s.runner.Run(username, 30*time.Second, "sync")
+		s.cmdStore.Append(username, "Auto sync", []string{"sync"})
+		if res.Err != nil || res.ExitCode != 0 || res.TimedOut {
+			applog.Warnf("auto git sync failed for %s: code=%d timeout=%v err=%v stderr=%q", username, res.ExitCode, res.TimedOut, res.Err, truncate(res.Stderr, 200))
+		} else {
+			applog.Infof("auto git sync completed for %s", username)
+		}
+	}()
+}
 
 func (s *Server) Handler() http.Handler {
 	// Basic Auth für alle außer /healthz

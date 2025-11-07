@@ -37,6 +37,7 @@ go build -o bin/dstask-web ./cmd/dstask-web
 
 ```yaml
 listen: ":8080"
+gitAutoSync: false
 repos:
   admin: "~/.dstask"      # user -> HOME/.dstask
 logging:
@@ -46,6 +47,8 @@ logging:
 # Place this file into `~/.dstask-ui/config.yaml` (Windows: `%USERPROFILE%\.dstask-ui\config.yaml`).
 ```
 Command-line overrides: run `dstask-web -listen 127.0.0.1:3000` to force a listen address. The flag takes precedence over both `config.yaml` and the `DSTWEB_LISTEN` environment variable.
+
+Setting `gitAutoSync: true` triggers an automatic `dstask sync` after every successful task mutation (add/edit/start/stop/batch). This keeps the `.dstask` repository synchronized without manual action.
 
 #### Path specification and expansion rules
 
@@ -140,6 +143,7 @@ git -C "$HOME/.dstask" branch --set-upstream-to=origin/main main
 - Recent dstask commands footer with timestamps (configurable, per-user)
 - Enhanced New Task form: select existing project or enter new, pick tags or add new, date picker for due
 - **Built-in stream player**: start radio streams tied to tasks, with per-task volume & mute persistence and browser playback controls
+- **Optional Git auto-sync**: enable `gitAutoSync` to run `dstask sync` automatically after each task change
 - Flash messages for success/error on actions
 - Batch actions with multi-select (start/stop/done/remove/note)
 - **Due filters**: Server-side filtering by due date (before/after/on/overdue) in HTML views
@@ -208,6 +212,7 @@ See the provided `config.yaml` for an example. Fields:
 ```yaml
 # dstaskBin: "/usr/local/bin/dstask"      # optional; if omitted, PATH autodetection is used
 listen: ":8080"                           # listen address (e.g., ":8080" or "127.0.0.1:3000")
+gitAutoSync: false                         # auto run `dstask sync` after each task mutation
 users:                                      # optional; if empty, env fallback is used
   - username: "admin"
     passwordHash: "<bcrypt-hash>"           # bcrypt (e.g., cost 10)
@@ -232,6 +237,7 @@ ui:
   - If it points to `.dstask`, that directory is used directly.
 - At runtime, `dstaskBin` can be overridden via `DSTWEB_DSTASK_BIN`.
 - Listen address can be overridden via `DSTWEB_LISTEN` (e.g., `:8080` or `127.0.0.1:3000`).
+- Auto sync can be toggled via `gitAutoSync` or the `DSTWEB_GIT_AUTOSYNC` environment variable (`true|false`).
 - Logging level can be overridden via `DSTWEB_LOG_LEVEL`.
 - Command log UI can be overridden via `DSTWEB_UI_SHOW_CMDLOG` (true/false) and `DSTWEB_CMDLOG_MAX` (int).
 
