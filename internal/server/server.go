@@ -2737,6 +2737,9 @@ func (s *Server) routes() {
 		case http.MethodPost:
 			username, _ := auth.UsernameFromRequest(r)
 			applog.Infof("/sync POST from %s", username)
+	if dirty, err := dstask.IsRepoDirty(s.cfg, username); err == nil && dirty {
+		s.setFlash(w, "warning", "Local .dstask repository has uncommitted changes. Please commit or pull before syncing again.")
+	}
 			// Falls kein Git-Repo vorhanden ist, biete Clone-Form an
 			if uhome, ok := config.ResolveHomeForUsername(s.cfg, username); ok && uhome != "" {
 				dir := uhome
