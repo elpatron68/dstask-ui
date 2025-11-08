@@ -152,48 +152,13 @@ func (s *Server) renderListHTML(w http.ResponseWriter, r *http.Request, title st
 // `rows` erwartet bereits gefilterte/aufbereitete Zeilen.
 func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title string, rows []map[string]string) {
 	t := template.Must(s.layoutTpl.Clone())
-	// enrich rows with action flags and computed flags
-    rowsAny := make([]map[string]any, 0, len(rows))
-    // load per-user music map to flag tasks with stream linkage
-    username, _ := auth.UsernameFromRequest(r)
-    musicSet := map[string]struct{}{}
-    if m, _, err := music.LoadForUser(s.cfg, username); err == nil && m != nil && m.Tasks != nil {
-        for tid := range m.Tasks { musicSet[tid] = struct{}{} }
-    }
-	for _, m := range rows {
-		status := strings.ToLower(m["status"])
-		canStart := status == "pending" || status == "paused"
-		canStop := status == "active"
-		canDone := status != "resolved" && status != "done"
-		mm := map[string]any{}
-		for k, v := range m {
-			mm[k] = v
+	// load per-user music map to flag tasks with stream linkage (used later when building rows)
+	username, _ := auth.UsernameFromRequest(r)
+	musicSet := map[string]struct{}{}
+	if m, _, err := music.LoadForUser(s.cfg, username); err == nil && m != nil && m.Tasks != nil {
+		for tid := range m.Tasks {
+			musicSet[tid] = struct{}{}
 		}
-		if cs, ok := m["created"]; ok {
-			mm["created"] = formatDateShort(cs)
-		}
-		if rs, ok := m["resolved"]; ok {
-			mm["resolved"] = formatDateShort(rs)
-		}
-		if ds, ok := m["due"]; ok {
-			mm["due"] = formatDateShort(ds)
-		}
-		mm["canStart"] = canStart
-		mm["canStop"] = canStop
-		mm["canDone"] = canDone
-		// Check for URLs in summary
-		summary := m["summary"]
-		mm["hasURLs"] = len(extractURLs(summary)) > 0
-		// Check for notes
-		notes := m["notes"]
-		mm["hasNotes"] = notes != "" && strings.TrimSpace(notes) != ""
-		if due, ok := m["due"]; ok {
-			mm["overdue"] = isOverdue(due)
-		}
-        if id, ok := m["id"]; ok {
-            if _, ok2 := musicSet[id]; ok2 { mm["hasMusic"] = true }
-        }
-        rowsAny = append(rowsAny, mm)
 	}
 	// sorting
 	sortKey := r.URL.Query().Get("sort")
@@ -328,7 +293,7 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
 			perPage = ppp
 		}
 	}
-	totalRows := len(rowsAny)
+	totalRows := len(rows)
 	totalPages := (totalRows + perPage - 1) / perPage
 	if totalPages == 0 {
 		totalPages = 1
@@ -341,7 +306,46 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
 	if end > totalRows {
 		end = totalRows
 	}
-	paginatedRows := rowsAny[start:end]
+	// Build enriched rows only for the sorted & paginated slice
+	sortedPaginated := rows[start:end]
+	rowsAny := make([]map[string]any, 0, len(sortedPaginated))
+	for _, m := range sortedPaginated {
+		status := strings.ToLower(m["status"])
+		canStart := status == "pending" || status == "paused"
+		canStop := status == "active"
+		canDone := status != "resolved" && status != "done"
+		mm := map[string]any{}
+		for k, v := range m {
+			mm[k] = v
+		}
+		if cs, ok := m["created"]; ok {
+			mm["created"] = formatDateShort(cs)
+		}
+		if rs, ok := m["resolved"]; ok {
+			mm["resolved"] = formatDateShort(rs)
+		}
+		if ds, ok := m["due"]; ok {
+			mm["due"] = formatDateShort(ds)
+		}
+		mm["canStart"] = canStart
+		mm["canStop"] = canStop
+		mm["canDone"] = canDone
+		// Check for URLs in summary
+		summary := m["summary"]
+		mm["hasURLs"] = len(extractURLs(summary)) > 0
+		// Check for notes
+		notes := m["notes"]
+		mm["hasNotes"] = notes != "" && strings.TrimSpace(notes) != ""
+		if due, ok := m["due"]; ok {
+			mm["overdue"] = isOverdue(due)
+		}
+		if id, ok := m["id"]; ok {
+			if _, ok2 := musicSet[id]; ok2 {
+				mm["hasMusic"] = true
+			}
+		}
+		rowsAny = append(rowsAny, mm)
+	}
 
 	// Build pagination links
 	buildPageURL := func(p int) string {
@@ -373,7 +377,7 @@ func (s *Server) renderExportTable(w http.ResponseWriter, r *http.Request, title
 	dueFilterType := q.Get("dueFilterType")
 	dueFilterDate := q.Get("dueFilterDate")
 	csrfToken := s.ensureCSRFToken(w, r)
-	_ = t.Execute(w, map[string]any{"Title": title, "Rows": paginatedRows, "Q": q.Get("q"), "Active": activeFromPath(r.URL.Path),
+	_ = t.Execute(w, map[string]any{"Title": title, "Rows": rowsAny, "Q": q.Get("q"), "Active": activeFromPath(r.URL.Path),
 		"Flash":      s.getFlash(r),
 		"ShowCmdLog": show, "CmdEntries": entries, "MoreURL": moreURL, "CanShowMore": canMore, "ReturnURL": ret,
 		"DueFilterType": dueFilterType, "DueFilterDate": dueFilterDate, "CSRFToken": csrfToken,
